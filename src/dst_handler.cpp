@@ -35,8 +35,8 @@ bool setDstPreset(uint8_t index) {
         return false;
     }
     
-    config.dst_preset_index = index;
-    strlcpy(config.dst_rule, DST_PRESETS[index * 3 + 1], sizeof(config.dst_rule));
+        config.time_config.dst_preset_index = index;
+        strlcpy(config.time_config.dst_rule, DST_PRESETS[index * 3 + 1], sizeof(config.time_config.dst_rule));
     saveConfig();
     Serial.printf("Установлен DST пресет: %s (%s)\n", 
                  DST_PRESETS[index * 3], 
@@ -63,8 +63,8 @@ void printDstPresets() {
 bool setDstPresetByName(const String& name) {
     for (int i = 0; DST_PRESETS[i] != nullptr; i += 3) {
         if (name.equalsIgnoreCase(DST_PRESETS[i])) {
-            config.dst_preset_index = i/3;
-            strlcpy(config.dst_rule, DST_PRESETS[i+1], sizeof(config.dst_rule));
+                config.time_config.dst_preset_index = i/3;
+                strlcpy(config.time_config.dst_rule, DST_PRESETS[i+1], sizeof(config.time_config.dst_rule));
             saveConfig();
             Serial.printf("Установлен DST: %s (%s)\n", DST_PRESETS[i], DST_PRESETS[i+2]);
             return true;

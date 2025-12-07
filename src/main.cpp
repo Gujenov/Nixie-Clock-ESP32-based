@@ -1,13 +1,14 @@
 #include <Arduino.h>
 #include "config.h"
 #include "hardware.h"
-#include "time_utils.h"
-#include "dst_handler.h"
+#include "time_manager.h"
 #include "command_handler.h"
-#include "alarm_handler.h"
 #include "button_handler.h"
+#include "alarm_handler.h"
 
-// НЕТ объявлений глобальных переменных - они уже в .cpp файлах!
+// Для периодической синхронизации
+unsigned long lastWiFiSyncCheck = 0;
+#define WIFI_SYNC_INTERVAL (12 * 3600 * 1000) // 12 часов
 
 void setup() {
     // Настройка пинов Энкодера
@@ -17,77 +18,106 @@ void setup() {
 
     // Инициализация энкодера
     encoder.attachSingleEdge(ENC_A, ENC_B);
-    encoder.setFilter(5000);
+    encoder.setFilter(15000);
     encoder.setCount(0);
 
     Serial.begin(115200);
     delay(500);
-    
+
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
 
+    // 1. Загрузка конфигурации
     initConfiguration();
-    timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
-    initTimeSource();
-    syncTime();
-    setTimeZone(config.timezone_offset, config.dst_enabled, config.dst_preset_index);
     
+    // 2. Инициализация аппаратных источников времени
+    initTimeSource();
+    
+    // 3. Инициализация TimeManager (делает setTimeZone из конфига)
+    timeManager.init();
+    
+    // 4. Синхронизация времени (если автосинхронизация включена)
+    if (config.time_config.auto_sync_enabled && WiFi.status() == WL_CONNECTED) {
+        timeManager.syncWithNTP();
+    }
+    
+    // 5. Настройка прерываний
     setupInterrupts();
+    
+    // 6. Вывод информации
     printSystemInfo();
     printHelp();
-    printEnabled = true;
+    
+    Serial.println("\n=== System Ready ===");
+    timeManager.printTimeInfo();
 }
 
 void loop() {
-    static time_t lastDisplayTime = 0;
-    static int32_t lastPos = 0;
-
-    // Обработка кнопки
-    uint8_t buttonEvent = CheckButton();
-    switch (buttonEvent) {
-        case BUTTON_PRESSED:
-            Serial.println("Короткое нажатие");
-            break;
-        case BUTTON_LONG:
-            Serial.println("Длинное нажатие");
-            break;
-        case BUTTON_VERY_LONG:
-            Serial.println("Очень длинное нажатие");
-            break;
+    static unsigned long lastLoop = 0;
+    unsigned long currentMillis = millis();
+    
+    // === БЫСТРЫЕ ОПЕРАЦИИ (выполняются часто) ===
+    
+    // 1. Обработка кнопки энкодера (каждые 20ms)
+    if (currentMillis - lastLoop >= 20) {
+        lastLoop = currentMillis;
+        uint8_t buttonEvent = CheckButton();
+        // Обработка кнопки...
     }
-
-    // Обработка энкодера
-    int32_t currentPos = encoder.getCount();
-    if (currentPos != lastPos) {
-        Serial.printf("%d\n", currentPos);
-        lastPos = currentPos;
+    
+    // 2. Обработка Serial команд (если есть данные)
+    if (Serial.available()) {
+        handleSerialCommands();
     }
-
-    // Обновление времени
-    if(timeUpdated) {
+    
+    // === ОБНОВЛЕНИЕ ВРЕМЕНИ (по прерыванию) ===
+    if (timeUpdated) {
         portENTER_CRITICAL(&timerMux);
         timeUpdated = false;
         portEXIT_CRITICAL(&timerMux);
         
-        time_t currentTime = getCurrentTime();
-        if(currentTime != lastDisplayTime) {
-            lastDisplayTime = currentTime;
-            updateDisplay(currentTime);
-            
-            struct tm *timeinfo = localtime(&currentTime);
-            uint8_t seconds = timeinfo->tm_sec;
-            
-            if((seconds % 20 == 0) && (printEnabled)) {
-                printTime();
-            }
+        // Получаем текущее время
+        time_t currentTime = timeManager.getCurrentTime();
+        
+        // Выводим в Serial каждые 20 секунд
+        struct tm *timeinfo = localtime(&currentTime);
+        if ((timeinfo->tm_sec % 20 == 0) && printEnabled) {
+            printTime();
         }
     }
-
-    // Обработка команд и будильников
-    if(Serial.available()) {
-        handleSerialCommands();
+    
+    // === МЕДЛЕННЫЕ ОПЕРАЦИИ (раз в секунду или реже) ===
+    
+    // 1. Синхронизация по WiFi (раз в 12 часов)
+    if (currentMillis - lastWiFiSyncCheck >= 1000) { // Проверяем каждую секунду
+        lastWiFiSyncCheck = currentMillis;
+        
+        // Если автосинхронизация включена и прошло 12 часов
+        if (config.time_config.auto_sync_enabled && 
+            WiFi.status() == WL_CONNECTED &&
+            currentMillis - lastWiFiSyncCheck >= WIFI_SYNC_INTERVAL) {
+            
+            Serial.println("[Auto-sync] Starting periodic NTP sync");
+            timeManager.syncWithNTP();
+            lastWiFiSyncCheck = currentMillis;
+        }
     }
     
+    // 2. Проверка будильников
     checkAlarms();
-    delay(10);
+    
+    // Небольшая задержка для стабильности
+    delay(1);
 }
+
+// Пример добавления команды в command_handler для TimeManager
+// В command_handler.cpp можно добавить:
+/*
+void handleTimeCommand() {
+    timeManager.printTimeInfo();
+}
+
+void handleSyncCommand() {
+    timeManager.syncWithNTP();
+}
+*/

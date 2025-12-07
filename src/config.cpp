@@ -21,18 +21,42 @@ void initConfiguration() {
   preferences.end();
 }
 
+
+
 void setDefaultConfig() {
-  memset(&config, 0, sizeof(config));
-  strlcpy(config.wifi_ssid, "Hogwarts-2.4", sizeof(config.wifi_ssid));
-  strlcpy(config.wifi_pass, "Alohomora!", sizeof(config.wifi_pass));
-  strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
-  config.dst_enabled = false;
-  config.dst_preset_index = 0; //Europe
-  strlcpy(config.dst_rule, "UTC+0", sizeof(config.dst_rule));
-  strlcpy(config.serial_number, "NC111115861", sizeof(config.serial_number));
-  config.alarm1 = {0, 0, false};
-  config.alarm2 = {0, 0, false};
-  saveConfig();
+    memset(&config, 0, sizeof(config));
+    
+    // WiFi
+    strlcpy(config.wifi_ssid, "Hogwarts-2.4", sizeof(config.wifi_ssid));
+    strlcpy(config.wifi_pass, "Alohomora!", sizeof(config.wifi_pass));
+    strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
+    
+    // TimeConfig defaults
+    config.time_config.manual_time_set = false;
+    config.time_config.auto_timezone = true;      // Разрешить автоопределение
+    config.time_config.auto_sync_enabled = true;  // Разрешить автосинхронизацию
+    config.time_config.dcf77_enabled = true;      // DCF77 включён
+    
+    config.time_config.timezone_offset = 1;       // UTC+1 по умолчанию
+    config.time_config.dst_enabled = true;
+    config.time_config.dst_preset_index = 3;      // EU пресет
+    strlcpy(config.time_config.dst_rule, 
+            "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00",
+            sizeof(config.time_config.dst_rule));
+    
+    config.time_config.sync_interval_hours = 12;  // Синхронизировать каждые 12 часов
+    config.time_config.last_ntp_sync = 0;         // Никогда не синхронизировались
+    config.time_config.last_dcf77_sync = 0;
+    config.time_config.sync_failures = 0;
+    
+    // Системные
+    strlcpy(config.serial_number, "NC111115861", sizeof(config.serial_number));
+    
+    // Будильники
+    config.alarm1 = {0, 0, false};
+    config.alarm2 = {0, 0, false};
+    
+    saveConfig();
 }
 
 void saveConfig() {

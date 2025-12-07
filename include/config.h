@@ -4,7 +4,9 @@
 #include <Arduino.h>
 
 // Версии и размеры буферов
-#define FIRMWARE_VERSION "1.0"
+//MCU.HW_VARIANT.RELEASE_TYPE.BUILD
+#define FIRMWARE_VERSION "1.A0.3.251206"
+
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
 #define NTP_SERVER_SIZE 32
@@ -28,19 +30,36 @@ struct AlarmSettings {
     bool enabled;
 };
 
+struct TimeConfig {
+    // Флаги управления
+    bool manual_time_set;        // Время установлено вручную
+    bool auto_timezone;          // Автоопределение пояса (true = разрешить менять)
+    bool auto_sync_enabled;      // Автосинхронизация разрешена
+    bool dcf77_enabled;          // Использовать DCF77
+    
+    // Настройки времени
+    int8_t timezone_offset;      // Часовой пояс (например, +2)
+    bool dst_enabled;            // Летнее время включено
+    uint8_t dst_preset_index;    // Индекс пресета DST
+    char dst_rule[64];           // Правила DST
+    
+    // Синхронизация
+    uint8_t sync_interval_hours; // Интервал синхронизации (часы)
+    uint32_t last_ntp_sync;      // Время последней NTP синхронизации (UNIX time)
+    uint32_t last_dcf77_sync;    // Время последней DCF77 синхронизации
+    uint8_t sync_failures;       // Счётчик неудачных синхронизаций
+};
+
 struct Config {
     // Настройки подключения
     char wifi_ssid[32];
     char wifi_pass[32];
     char ntp_server[NTP_SERVER_SIZE];
     
-    // Настройки времени
-    int8_t timezone_offset;
-    bool dst_enabled;
-    uint8_t dst_preset_index;
-    char dst_rule[64];
+    // ВСЁ, связанное со временем - в TimeConfig
+    TimeConfig time_config;
     
-    // Системные
+    // Системные настройки
     char serial_number[12];
     
     // Будильники
@@ -48,9 +67,9 @@ struct Config {
     AlarmSettings alarm2;
 };
 
-enum TimeSource { INTERNAL_RTC, EXTERNAL_DS3231 };
+enum HardwareSource { INTERNAL_RTC, EXTERNAL_DS3231 };
 
-extern TimeSource currentTimeSource;
+extern HardwareSource currentTimeSource;
 extern Config config;
 extern Preferences preferences;
 

@@ -7,7 +7,8 @@ RTC_DS3231 *rtc = nullptr;
 hw_timer_t *timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 volatile bool timeUpdated = false;
-TimeSource currentTimeSource = INTERNAL_RTC;
+HardwareSource currentTimeSource = INTERNAL_RTC;
+bool ds3231_available = false;
 
 void setupInterrupts() {
   if(currentTimeSource == EXTERNAL_DS3231 && rtc) {
@@ -48,17 +49,23 @@ void initTimeSource() {
     
     Wire.beginTransmission(0x68);
     if(Wire.endTransmission() == 0) {
-        rtc = new RTC_DS3231();
-        if(rtc && rtc->begin()) {
-            currentTimeSource = EXTERNAL_DS3231;
-            Serial.println("Используется внешний RTC (DS3231)");
-            return;
-        }
-        if(rtc) delete rtc;
+      rtc = new RTC_DS3231();
+      if(rtc && rtc->begin()) {
+        currentTimeSource = EXTERNAL_DS3231;
+        ds3231_available = true;
+        Serial.println("Используется внешний RTC (DS3231) — доступен");
+        return;
+      }
+      if(rtc) {
+        delete rtc;
+        rtc = nullptr;
+      }
     }
-    
+
+    // Если не удалось инициализировать внешние часы — помечаем как недоступные
     currentTimeSource = INTERNAL_RTC;
-    Serial.println("Используется внутренний RTC");
+    ds3231_available = false;
+    Serial.println("Внешние часы DS3231 не обнаружены — используется внутренний RTC");
 }
 
 void updateDisplay(time_t now) {

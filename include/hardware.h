@@ -4,6 +4,7 @@
 #include <RTClib.h>
 #include <ESP32Encoder.h>
 #include <Arduino.h>
+#include <config.h>
 
 // Конфигурация пинов
 #define I2C_SDA 4
@@ -18,6 +19,8 @@ extern RTC_DS3231 *rtc;
 extern hw_timer_t *timer;
 extern portMUX_TYPE timerMux;
 extern volatile bool timeUpdated;
+extern bool ds3231_available;
+
 
 void setupInterrupts();
 void blinkError(int count);

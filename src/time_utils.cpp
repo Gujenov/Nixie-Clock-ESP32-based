@@ -39,9 +39,8 @@ bool syncTime() {
     if (timeClient->forceUpdate()) {
       time_t utcTime = timeClient->getEpochTime();
       
-      setTimeZone(config.timezone_offset, config.dst_enabled, config.dst_preset_index);
-      time_t localTime = utcTime + config.timezone_offset * 3600;
-        if (config.dst_enabled) {
+      time_t localTime = utcTime + config.time_config.timezone_offset * 3600;
+        if (config.time_config.dst_enabled) {
         localTime = mktime(localtime(&localTime)); // Автокоррекция DST
         }
 
@@ -51,18 +50,19 @@ bool syncTime() {
       Serial.printf("[NTP] Получено UTC: %02d:%02d:%02d\n", 
                    tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
       Serial.printf("[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)\n",
-                   tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
-                   config.timezone_offset, config.dst_enabled ? "ON" : "OFF");
+           tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
+           config.time_config.timezone_offset, config.time_config.dst_enabled ? "ON" : "OFF");
 
-      // Записываем время встроенного RTC
-      struct timeval tv = { localTime, 0 };
+      // Записываем системное время в UTC (чтобы системный clock хранит UTC)
+      struct timeval tv = { utcTime, 0 };
       settimeofday(&tv, NULL);
-      Serial.println("[RTC] Время записано во внутренний RTC");
+      Serial.println("[RTC] Системное время (UTC) записано во внутренний RTC");
 
       // Записываем в DS3231 (если подключён)
       if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+        // RTC обычно хранит локальное календарное время — используем локальное время для записи
         rtc->adjust(DateTime(localTime));
-        Serial.println("[DS3231] Время записано в аппаратные часы");
+        Serial.println("[DS3231] Время записано в аппаратные часы (локальное время)");
       }
 
       success = true;
