@@ -61,24 +61,23 @@ def update_version(project_dir=None):
         print(f"❌ Ошибка при обновлении версии: {e}")
         return False
 
-# Точка входа для PlatformIO
+# Точка входа для PlatformIO - ОБЯЗАТЕЛЬНО вызывается перед компиляцией
+# PlatformIO ищет функцию, которой можно передать env объект
 def main(env=None):
-    """Главная функция, вызываемая PlatformIO"""
-    if env is not None:
-        # Используем project_dir от PlatformIO env
-        project_dir = env.get('PROJECT_DIR', os.getcwd())
-    else:
+    """Функция, вызываемая PlatformIO перед сборкой"""
+    if env is None:
         project_dir = os.getcwd()
+    else:
+        project_dir = env.get('PROJECT_DIR', os.getcwd())
     
-    print("[PRE-BUILD] Обновление версии прошивки...", flush=True)
-    update_version(project_dir)
-    print("[PRE-BUILD] Версия готова к компиляции", flush=True)
+    print("\n[PRE-BUILD] Обновление версии прошивки...", flush=True)
+    success = update_version(project_dir)
+    if success:
+        print("[PRE-BUILD] ✅ Версия готова к компиляции\n", flush=True)
+    else:
+        print("[PRE-BUILD] ⚠️  Предупреждение: не удалось обновить версию\n", flush=True)
 
 # Для работы с PlatformIO
 if __name__ == "__main__":
     # Если скрипт запущен напрямую (не через PlatformIO)
-    update_version()
-else:
-    # Если скрипт импортирован/запущен через PlatformIO
-    # PlatformIO вызовет main(env) автоматически
-    pass
+    main()
