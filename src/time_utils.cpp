@@ -3,8 +3,8 @@
 #include "dst_handler.h"
 #include "hardware.h"
 
-WiFiUDP ntpUDP;
-NTPClient *timeClient;
+extern WiFiUDP ntpUDP;         // Определен где-то еще (возможно в .ino)
+extern NTPClient *timeClient;  // Определен в config.cpp
 
 time_t getCurrentTime() {
   if(currentTimeSource == EXTERNAL_DS3231 && rtc) {
@@ -32,7 +32,7 @@ void initTimeSource() {
             // Проверяем валидность времени в DS3231
             DateTime now = rtc->now();
             if(now.year() >= 2021 && now.year() <= 2100) {
-                Serial.println("✓ Используется внешний DS3231 (время валидно)");
+                Serial.println("\n✓ Используется внешний DS3231 (время валидно)");
                 
                 // Проверяем и устанавливаем день недели если нужно
                 updateDayOfWeekInRTC();
@@ -43,7 +43,7 @@ void initTimeSource() {
                 settimeofday(&tv, NULL);
                 Serial.println("Системное время обновлено из DS3231");
             } else {
-                Serial.println("⚠ DS3231 найден, но время некорректно");
+                Serial.println("\n⚠ DS3231 найден, но время некорректно");
                 setDefaultTime();
             }
             return;
@@ -55,72 +55,118 @@ void initTimeSource() {
     // Если не удалось инициализировать внешние часы
     currentTimeSource = INTERNAL_RTC;
     ds3231_available = false;
-    Serial.println("✗ DS3231 не обнаружен");
+    Serial.println("\n✗ DS3231 не обнаружен");
     setDefaultTime(); // 9:00 6.07.1990 Пятница
 }
 
 bool syncTime() {
-  digitalWrite(LED_PIN, HIGH); // Индикация начала синхронизации
-  Serial.println("[NTP] Попытка синхронизации...");
-
-  // Подключаемся к WiFi
-  WiFi.mode(WIFI_STA);
-  if (WiFi.begin(config.wifi_ssid, config.wifi_pass) != WL_CONNECTED) {
-    for (int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; i++) {
-      delay(500);
-      Serial.print(".");
+    // Проверяем, инициализирован ли timeClient
+    if (!timeClient) {
+        Serial.println("[NTP] Ошибка: timeClient не инициализирован");
+        return false;
     }
-  }
-
-  bool success = false;
-  if (WiFi.status() == WL_CONNECTED) {
-    timeClient->begin();
-    timeClient->setTimeOffset(0); // Явно запрашиваем UTC
-
-    if (timeClient->forceUpdate()) {
-      time_t utcTime = timeClient->getEpochTime();
-      
-      time_t localTime = utcTime + config.time_config.timezone_offset * 3600;
-        if (config.time_config.dst_enabled) {
-        localTime = mktime(localtime(&localTime)); // Автокоррекция DST
+    
+    digitalWrite(LED_PIN, HIGH);
+    Serial.println("[NTP] Попытка синхронизации...");
+    
+    bool success = false;
+    
+    // 1. Включаем WiFi
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(config.wifi_ssid, config.wifi_pass);
+    
+    // 2. Ждем подключения с таймаутом
+    int attempts = 0;
+    Serial.print("[WiFi] Подключение");
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    Serial.println();
+    
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[NTP] Ошибка: не удалось подключиться к WiFi");
+        digitalWrite(LED_PIN, LOW);
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+    
+    Serial.printf("[WiFi] Подключено к %s\n", config.wifi_ssid);
+    Serial.printf("[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
+    
+    // 3. Пробуем синхронизироваться с NTP
+    try {
+        timeClient->begin();
+        timeClient->setTimeOffset(0); // Запрашиваем UTC
+        
+        if (timeClient->forceUpdate()) {
+            time_t utcTime = timeClient->getEpochTime();
+            
+            // Проверяем, что время валидное (не 1970 год)
+            if (utcTime > 1609459200) { // После 2021-01-01
+                
+                time_t localTime = utcTime + config.time_config.timezone_offset * 3600;
+                if (config.time_config.dst_enabled) {
+                    localTime = mktime(localtime(&localTime)); // Автокоррекция DST
+                }
+                
+                // Отладочный вывод
+                struct tm *tm_utc = gmtime(&utcTime);
+                struct tm *tm_local = localtime(&localTime);
+                Serial.printf("[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d\n", 
+                           tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
+                           tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
+                Serial.printf("[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)\n",
+                       tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
+                       config.time_config.timezone_offset, config.time_config.dst_enabled ? "ON" : "OFF");
+                
+                // Записываем системное время в UTC
+                struct timeval tv = { utcTime, 0 };
+                settimeofday(&tv, NULL);
+                Serial.println("[RTC] Время NTP записано во внутренний RTC");
+                
+                // Записываем в DS3231 (если подключён)
+                if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+                    // Для записи в RTC используем локальное время
+                    DateTime rtcTime(localTime);
+                    rtc->adjust(rtcTime);
+                    Serial.println("[DS3231] Время NTP в аппаратные часы");
+                }
+                
+                // Обновляем время последней синхронизации в конфиге
+                config.time_config.last_ntp_sync = utcTime;
+                saveConfig();
+                
+                success = true;
+                digitalWrite(LED_PIN, LOW);
+            } else {
+                Serial.println("[NTP] Ошибка: получено некорректное время");
+            }
+        } else {
+            Serial.println("[NTP] Ошибка: forceUpdate() не удался");
         }
-
-      // Отладочный вывод (UTC + локальное время)
-      struct tm *tm_utc = gmtime(&utcTime);
-      struct tm *tm_local = localtime(&localTime);
-      Serial.printf("[NTP] Получено UTC: %02d:%02d:%02d\n", 
-                   tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
-      Serial.printf("[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)\n",
-           tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
-           config.time_config.timezone_offset, config.time_config.dst_enabled ? "ON" : "OFF");
-
-      // Записываем системное время в UTC (чтобы системный clock хранил UTC)
-      struct timeval tv = { utcTime, 0 };
-      settimeofday(&tv, NULL);
-      Serial.println("[RTC] Системное время (UTC) записано во внутренний RTC");
-
-      // Записываем в DS3231 (если подключён)
-      if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-        // RTC обычно хранит локальное календарное время — используем локальное время для записи
-        rtc->adjust(DateTime(localTime));
-        Serial.println("[DS3231] Время записано в аппаратные часы (локальное время)");
-      }
-
-      success = true;
-      digitalWrite(LED_PIN, LOW); // Успешное завершение
+        
+        timeClient->end();
+    } catch (...) {
+        Serial.println("[NTP] Исключение при синхронизации!");
     }
-    timeClient->end();
-  }
-
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-
-  if (!success) {
-    blinkError(11); // Индикация ошибки
-    Serial.println("[ERROR] Не удалось синхронизировать время!");
-  }
-
-  return success;
+    
+    // 4. Отключаем WiFi
+    Serial.println("[WiFi] Отключение...");
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.mode(WIFI_OFF);
+    
+    if (!success) {
+        blinkError(11);
+        Serial.println("[NTP] Не удалось синхронизировать время!");
+    } else {
+        Serial.println("[NTP] Синхронизация успешна!");
+    }
+    
+    return success;
 }
 
 void setTimeZone(int8_t offset, bool dst_enabled, uint8_t preset_index) {
@@ -324,7 +370,6 @@ void setDefaultTime() {
         Serial.println("Время по умолчанию записано в DS3231");
     }
     
-    Serial.println("Время по умолчанию установлено");
 }
 
 // Вспомогательная функция для обновления дня недели в RTC
@@ -348,3 +393,4 @@ void updateDayOfWeekInRTC() {
         }
     }
 }
+

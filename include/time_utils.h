@@ -21,3 +21,4 @@ void updateDayOfWeekInRTC();
 void checkAndSyncTime(); // Проверка необходимости синхронизации (12:00 и 00:00)
 bool syncWithDCF77();    // Синхронизация через DCF77
 void handleManualTimeSetting(); // Обработка ручной установки времени
+void initNTPClient(); // Инициализация NTP клиента

@@ -1,5 +1,9 @@
 #include "config.h"
 #include "hardware.h"
+#include "time_utils.h"  // Для ntpUDP
+
+WiFiUDP ntpUDP;           
+NTPClient *timeClient = nullptr;
 
 Preferences preferences;
 Config config;
@@ -19,6 +23,26 @@ void initConfiguration() {
   }
   
   preferences.end();
+
+  initNTPClient();
+}
+
+void initNTPClient() {
+    if (!timeClient) {
+        timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
+        Serial.printf("\n[NTP] Клиент инициализирован с сервером: %s\n", config.ntp_server);
+    }
+}
+
+void updateNTPServer(const char* server) {
+    if (timeClient) {
+        delete timeClient;
+        timeClient = nullptr;
+    }
+    strlcpy(config.ntp_server, server, sizeof(config.ntp_server));
+    initNTPClient();
+    saveConfig();
+    Serial.printf("[Config] NTP сервер обновлён: %s\n", server);
 }
 
 void setDefaultConfig() {

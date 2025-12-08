@@ -2,6 +2,7 @@
 
 #include <Preferences.h>
 #include <Arduino.h>
+#include <NTPClient.h>
 
 // Версии и размеры буферов
 //MCU.HW_VARIANT.RELEASE_TYPE.BUILD
@@ -72,7 +73,10 @@ enum HardwareSource { INTERNAL_RTC, EXTERNAL_DS3231 };
 extern HardwareSource currentTimeSource;
 extern Config config;
 extern Preferences preferences;
+extern NTPClient *timeClient;  // Объявляем как extern
 
 void initConfiguration();
 void setDefaultConfig();
 void saveConfig();
+void initNTPClient();
+void updateNTPServer(const char* server);

@@ -19,6 +19,7 @@ void setup() {
     
     // 2. Загрузка конфигурации
     initConfiguration();
+    initNTPClient();
     
     // 3. Проверка источников времени
     initTimeSource(); 
@@ -30,7 +31,6 @@ void setup() {
     
     // 5. Попытка NTP синхронизации (если разрешено)
     if(config.time_config.auto_sync_enabled && strlen(config.wifi_ssid) > 0) {
-        Serial.println("Попытка NTP синхронизации...");
         syncTime();  // Существующая функция из time_utils.cpp
     }
     
