@@ -10,6 +10,24 @@ volatile bool timeUpdated = false;
 HardwareSource currentTimeSource = INTERNAL_RTC;
 bool ds3231_available = false;
 
+void initHardware() {
+// Настройка пинов Энкодера
+    pinMode(ENC_A, INPUT_PULLUP);
+    pinMode(ENC_B, INPUT_PULLUP);
+    pinMode(ENC_BTN, INPUT_PULLUP);
+
+    // Инициализация энкодера
+    encoder.attachSingleEdge(ENC_A, ENC_B);
+    encoder.setFilter(15000);
+    encoder.setCount(0);
+
+    Serial.begin(115200);
+    delay(300);
+
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);
+}
+
 void setupInterrupts() {
   if(currentTimeSource == EXTERNAL_DS3231 && rtc) {
     rtc->writeSqwPinMode(DS3231_SquareWave1Hz);
@@ -43,41 +61,7 @@ void IRAM_ATTR onTimeInterrupt() {
     portEXIT_CRITICAL_ISR(&timerMux);
 }
 
-void initTimeSource() {
-    Wire.begin(I2C_SDA, I2C_SCL);
-    Wire.setClock(100000);
-    
-    Wire.beginTransmission(0x68);
-    if(Wire.endTransmission() == 0) {
-      rtc = new RTC_DS3231();
-      if(rtc && rtc->begin()) {
-        currentTimeSource = EXTERNAL_DS3231;
-        ds3231_available = true;
-        Serial.println("Используется внешний DS3231");
-        return;
-      }
-      if(rtc) {
-        delete rtc;
-        rtc = nullptr;
-      }
-    }
-
-    // Если не удалось инициализировать внешние часы — помечаем как недоступные
-    currentTimeSource = INTERNAL_RTC;
-    ds3231_available = false;
-    Serial.println("DS3231 не обнаружен — работает внутренний RTC");
-}
 
 void updateDisplay(time_t now) {
     digitalWrite(LED_PIN, LOW);
-}
-
-time_t getRTCTime() {
-    if(currentTimeSource == EXTERNAL_DS3231 && rtc) {
-        return rtc->now().unixtime();
-    } else {
-        struct tm timeinfo;
-        getLocalTime(&timeinfo);
-        return mktime(&timeinfo);
-    }
 }

@@ -24,7 +24,7 @@ extern bool ds3231_available;
 
 void setupInterrupts();
 void blinkError(int count);
-
+void initHardware();
 void IRAM_ATTR onTimeInterrupt();
 void initTimeSource();
 void updateDisplay(time_t now);

@@ -18,6 +18,47 @@ time_t getCurrentTime() {
   }
 }
 
+void initTimeSource() {
+    Wire.begin(I2C_SDA, I2C_SCL);
+    Wire.setClock(100000);
+    
+    Wire.beginTransmission(0x68);
+    if(Wire.endTransmission() == 0) {
+        rtc = new RTC_DS3231();
+        if(rtc && rtc->begin()) {
+            currentTimeSource = EXTERNAL_DS3231;
+            ds3231_available = true;
+            
+            // Проверяем валидность времени в DS3231
+            DateTime now = rtc->now();
+            if(now.year() >= 2021 && now.year() <= 2100) {
+                Serial.println("✓ Используется внешний DS3231 (время валидно)");
+                
+                // Проверяем и устанавливаем день недели если нужно
+                updateDayOfWeekInRTC();
+                
+                // Обновляем системное время из RTC
+                time_t rtc_time = now.unixtime();
+                struct timeval tv = { rtc_time, 0 };
+                settimeofday(&tv, NULL);
+                Serial.println("Системное время обновлено из DS3231");
+            } else {
+                Serial.println("⚠ DS3231 найден, но время некорректно");
+                setDefaultTime();
+            }
+            return;
+        }
+        if(rtc) delete rtc;
+        rtc = nullptr;
+    }
+
+    // Если не удалось инициализировать внешние часы
+    currentTimeSource = INTERNAL_RTC;
+    ds3231_available = false;
+    Serial.println("✗ DS3231 не обнаружен");
+    setDefaultTime(); // 9:00 6.07.1990 Пятница
+}
+
 bool syncTime() {
   digitalWrite(LED_PIN, HIGH); // Индикация начала синхронизации
   Serial.println("[NTP] Попытка синхронизации...");
@@ -53,7 +94,7 @@ bool syncTime() {
            tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
            config.time_config.timezone_offset, config.time_config.dst_enabled ? "ON" : "OFF");
 
-      // Записываем системное время в UTC (чтобы системный clock хранит UTC)
+      // Записываем системное время в UTC (чтобы системный clock хранил UTC)
       struct timeval tv = { utcTime, 0 };
       settimeofday(&tv, NULL);
       Serial.println("[RTC] Системное время (UTC) записано во внутренний RTC");
@@ -159,10 +200,10 @@ bool setManualTime(const String &timeStr) {
 
   // Если дата не была установлена (1970 год), используем дату по умолчанию
   if (timeinfo.tm_year < 101) { // год менее 2001
-    timeinfo.tm_year = 123;    // 2023 год (123 = 2023-1900)
-    timeinfo.tm_mon = 0;       // январь
-    timeinfo.tm_mday = 1;      // 1 число
-    Serial.println("Установлена дата по умолчанию: 01.01.2023");
+    timeinfo.tm_year = 90;    // 1990 год (90 = 1990-1900)
+    timeinfo.tm_mon = 6;       // июль
+    timeinfo.tm_mday = 6;      // 6 число
+    Serial.println("Установлена дата по умолчанию: 06.07.1990");
   }
 
   // Устанавливаем новое время (дата остаётся прежней)
@@ -187,8 +228,10 @@ bool setManualTime(const String &timeStr) {
   Serial.println("Время успешно обновлено");
   return true;
 }
+
 // Установка даты (день.месяц.год)
 bool setManualDate(const String &dateStr) {
+
   int day, month, year;
   if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
     Serial.println("Ошибка формата даты. Используйте DD.MM.YYYY");
@@ -211,10 +254,10 @@ bool setManualDate(const String &dateStr) {
       timeinfo.tm_min < 0 || timeinfo.tm_min > 59 ||
       timeinfo.tm_sec < 0 || timeinfo.tm_sec > 59) {
     // Если время содержит недопустимые значения
-    timeinfo.tm_hour = 0;
+    timeinfo.tm_hour = 9;
     timeinfo.tm_min = 0;
     timeinfo.tm_sec = 0;
-    Serial.println("Обнаружены некорректные значения времени, установлено 00:00:00");
+    Serial.println("Обнаружены некорректные значения времени, установлено 09:00:00");
   }
 
   // Устанавливаем новую дату (время остаётся прежним)
@@ -238,4 +281,70 @@ bool setManualDate(const String &dateStr) {
 
   Serial.println("Дата успешно обновлена");
   return true;
+}
+
+int calculateDayOfWeek(int year, int month, int day) {
+    if (month < 3) {
+        month += 12;
+        year -= 1;
+    }
+    int k = year % 100;
+    int j = year / 100;
+    int h = (day + (13 * (month + 1)) / 5 + k + (k / 4) + (j / 4) + (5 * j)) % 7;
+    
+    // Преобразуем к стандарту C: 0=воскресенье, 1=понедельник, ..., 6=суббота
+    return (h + 5) % 7; // Zeller дает: 0=суббота, 1=воскресенье, ... так что корректируем
+}
+
+// Установка времени по умолчанию: 9:00 6.07.1990 Пятница
+void setDefaultTime() {
+    Serial.println("Установка времени по умолчанию: 09:00 06.07.1990 (пятница)");
+    
+    struct tm default_time = {0};
+    default_time.tm_year = 1990 - 1900; // 1990 год
+    default_time.tm_mon = 7 - 1;        // Июль (месяцы 0-11)
+    default_time.tm_mday = 6;           // 6 число
+    default_time.tm_hour = 9;           // 9 часов
+    default_time.tm_min = 0;            // 0 минут
+    default_time.tm_sec = 0;            // 0 секунд
+    default_time.tm_isdst = 0;          // Не летнее время
+    
+    // Устанавливаем день недели (пятница = 5 в C стандарте)
+    default_time.tm_wday = calculateDayOfWeek(1990, 7, 6);
+    
+    time_t default_epoch = mktime(&default_time);
+    
+    // Устанавливаем системное время
+    struct timeval tv = { default_epoch, 0 };
+    settimeofday(&tv, NULL);
+    
+    // Если есть внешние часы, обновляем их тоже
+    if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+        rtc->adjust(DateTime(default_epoch));
+        Serial.println("Время по умолчанию записано в DS3231");
+    }
+    
+    Serial.println("Время по умолчанию установлено");
+}
+
+// Вспомогательная функция для обновления дня недели в RTC
+void updateDayOfWeekInRTC() {
+    if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+        DateTime now = rtc->now();
+        
+        // Проверяем, установлен ли день недели (0-7, где 0=нет дня недели)
+        if (now.dayOfTheWeek() == 0) {
+            int dow = calculateDayOfWeek(now.year(), now.month(), now.day());
+            // Конвертируем из C формата (0=вс) в формат DS3231 (1=пн)
+            int rtc_dow = (dow == 0) ? 7 : dow; // Вс=7, Пн=1, ..., Сб=6
+            // Обновляем день недели в RTC
+            // Для DS3231 нужно перезаписать время с правильным днем недели
+            DateTime updated(now.year(), now.month(), now.day(), 
+                            now.hour(), now.minute(), now.second());
+            // К сожалению, библиотека RTClib обычно не позволяет установить день недели отдельно
+            // Нужно записывать полностью
+            rtc->adjust(updated);
+            Serial.printf("День недели установлен в RTC: %d\n", rtc_dow);
+        }
+    }
 }
