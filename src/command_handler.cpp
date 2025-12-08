@@ -6,6 +6,7 @@
 #include "button_handler.h"
 #include "time_manager.h"
 
+
 void handleSerialCommands() {
   if(!Serial.available()) return;
   
@@ -40,7 +41,7 @@ void handleSerialCommands() {
   else if(command.equals("utc") || command.equals("UTC")) {
     // UTC время
     Serial.println("=== UTC Time ===");
-    time_t utcTime = timeManager.getUTC();
+    time_t utcTime = timeManager.getUTCTime();
     struct tm* timeinfo = gmtime(&utcTime);
     char buffer[32];
     strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S UTC", timeinfo);
@@ -48,6 +49,10 @@ void handleSerialCommands() {
     Serial.print("(Timestamp: ");
     Serial.print(utcTime);
     Serial.println(")");
+  }
+  else if(command.equals("WF")){ 
+    Serial.printf("WiFi SSID: %s\n", config.wifi_ssid);
+    Serial.printf("NTP сервер: %s\n", config.ntp_server);
   }
   else if(command.equals("timeinfo") || command.equals("ti")) {
     // Полная информация о времени через TimeManager
@@ -226,7 +231,7 @@ void handleSerialCommands() {
       strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
       Serial.println(buffer);
       
-      time_t now = timeManager.getUTC();
+      time_t now = timeManager.getUTCTime();
       time_t diff = now - config.time_config.last_ntp_sync;
       Serial.print("Time since last sync: ");
       Serial.print(diff);
@@ -251,20 +256,21 @@ void handleSerialCommands() {
 void printHelp() {
   Serial.println("\n=== Доступные команды ===");
 
-  Serial.println("\n  time, LT     - Текущее локальное время");
-  Serial.println("  utc, UTC     - Текущее UTC время");
-  Serial.println("  timeinfo, ti - Полная информация о времени");
-  Serial.println("  timesource, ts - Источник текущего времени");
-  Serial.println("  sync, ntp    - Принудительная синхронизация с NTP");
-  Serial.println("  syncstatus, ss   - Статус последней синхронизации");
-  Serial.println("  reset config - сбросить настройки к значениям по умолчанию");
+  Serial.println("\ntime, LT     - Текущее локальное время");
+  Serial.println("utc, UTC     - Текущее UTC время");
+  Serial.println("timeinfo, ti - Полная информация о времени");
+  Serial.println("timesource, ts - Источник текущего времени");
+  Serial.println("sync, ntp    - Принудительная синхронизация с NTP");
+  Serial.println("syncstatus, ss   - Статус последней синхронизации");
+  Serial.println("reset config - сбросить настройки к значениям по умолчанию");
 
-  Serial.println("\n help - показать это сообщение");
-  Serial.println(" info - Информация о системе");
-  Serial.println(" espinfo - показать информацию об ESP32");
+  Serial.println("\nhelp, ? - показать это сообщение");
+  Serial.println("WF - информация о WI-FI подключении");
+  Serial.println("info - Информация о системе");
+  Serial.println("espinfo - показать информацию об ESP32");
 
-  Serial.println("\n  setup          - Вход в режим настройки");
-  Serial.println("  out            - Выход из режима настройки");
+  Serial.println("\nsetup          - Вход в режим настройки");
+  Serial.println("out            - Выход из режима настройки");
 
   Serial.println("==========================\n");
 }

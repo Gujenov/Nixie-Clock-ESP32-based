@@ -6,6 +6,7 @@
 #include "button_handler.h"
 #include "alarm_handler.h"
 
+
 // Для периодической синхронизации
 unsigned long lastWiFiSyncCheck = 0;
 #define WIFI_SYNC_INTERVAL (12 * 3600 * 1000) // 12 часов
@@ -22,7 +23,7 @@ void setup() {
     encoder.setCount(0);
 
     Serial.begin(115200);
-    delay(500);
+    delay(300);
 
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
@@ -44,11 +45,8 @@ void setup() {
     // 5. Настройка прерываний
     setupInterrupts();
     
-    // 6. Вывод информации
-    printSystemInfo();
-    printHelp();
-    
-    Serial.println("\n=== System Ready ===");
+   
+    Serial.println("\n=== Система готова ===");
     timeManager.printTimeInfo();
 }
 
@@ -77,7 +75,7 @@ void loop() {
         portEXIT_CRITICAL(&timerMux);
         
         // Получаем текущее время
-        time_t currentTime = timeManager.getCurrentTime();
+        time_t currentTime = timeManager.getUTCTime();
         
         // Выводим в Serial каждые 20 секунд
         struct tm *timeinfo = localtime(&currentTime);

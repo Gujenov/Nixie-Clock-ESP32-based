@@ -53,7 +53,7 @@ void initTimeSource() {
       if(rtc && rtc->begin()) {
         currentTimeSource = EXTERNAL_DS3231;
         ds3231_available = true;
-        Serial.println("Используется внешний RTC (DS3231) — доступен");
+        Serial.println("Используется внешний DS3231");
         return;
       }
       if(rtc) {
@@ -65,7 +65,7 @@ void initTimeSource() {
     // Если не удалось инициализировать внешние часы — помечаем как недоступные
     currentTimeSource = INTERNAL_RTC;
     ds3231_available = false;
-    Serial.println("Внешние часы DS3231 не обнаружены — используется внутренний RTC");
+    Serial.println("DS3231 не обнаружен — работает внутренний RTC");
 }
 
 void updateDisplay(time_t now) {

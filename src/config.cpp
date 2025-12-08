@@ -15,13 +15,11 @@ void initConfiguration() {
   } else {
     // Загружаем сохраненную конфигурацию
     preferences.getBytes("data", &config, sizeof(config));
-    Serial.println("Конфигурация загружена из памяти");
+    Serial.println("\nКонфигурация загружена из памяти");
   }
   
   preferences.end();
 }
-
-
 
 void setDefaultConfig() {
     memset(&config, 0, sizeof(config));
@@ -39,7 +37,7 @@ void setDefaultConfig() {
     
     config.time_config.timezone_offset = 1;       // UTC+1 по умолчанию
     config.time_config.dst_enabled = true;
-    config.time_config.dst_preset_index = 3;      // EU пресет
+    config.time_config.dst_preset_index = 3;      // PL пресет
     strlcpy(config.time_config.dst_rule, 
             "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00",
             sizeof(config.time_config.dst_rule));
