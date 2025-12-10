@@ -1,73 +1,154 @@
 #include "time_utils.h"
 #include "config.h"
-#include "dst_handler.h"
 #include "hardware.h"
 
 extern WiFiUDP ntpUDP;         // Определен где-то еще (возможно в .ino)
 extern NTPClient *timeClient;  // Определен в config.cpp
 
-time_t getCurrentTime() {
-  if(currentTimeSource == EXTERNAL_DS3231 && rtc) {
-    return rtc->now().unixtime();
-  } else {
-    struct tm timeinfo;
-    if(getLocalTime(&timeinfo)) {
-      return mktime(&timeinfo);
-    }
-    return 0;
-  }
-}
-
 void initTimeSource() {
     Wire.begin(I2C_SDA, I2C_SCL);
     Wire.setClock(100000);
     
-    Wire.beginTransmission(0x68);
+    bool rtcFound = false;
+    
+    // 1. Проверяем наличие DS3231 на шине I2C
+    Wire.beginTransmission(0x68); // Адрес DS3231
     if(Wire.endTransmission() == 0) {
+        rtcFound = true;
+    }
+    
+    // 2. Если DS3231 найден, пытаемся инициализировать
+    if(rtcFound) {
         rtc = new RTC_DS3231();
         if(rtc && rtc->begin()) {
             currentTimeSource = EXTERNAL_DS3231;
             ds3231_available = true;
             
-            // Проверяем валидность времени в DS3231
+            // 3. Проверяем валидность времени в DS3231
             DateTime now = rtc->now();
+            
             if(now.year() >= 2021 && now.year() <= 2100) {
-                Serial.println("\n✓ Используется внешний DS3231 (время валидно)");
+                Serial.println("\n✓ DS3231 инициализирован, время валидно");
                 
-                // Проверяем и устанавливаем день недели если нужно
+                // 4. КОНВЕРТИРУЕМ В UTC И УСТАНАВЛИВАЕМ СИСТЕМНОЕ ВРЕМЯ
+                // Предполагаем что в DS3231 уже UTC!
+                time_t rtc_utc = convertDateTimeToTimeT(now);
+                
+                // Устанавливаем системное время (должно быть UTC)
+                struct timeval tv = { rtc_utc, 0 };
+                settimeofday(&tv, NULL);
+                
+                Serial.print("\n[DS3231] Установлено системное время: ");
+                printTimeFromTimeT(rtc_utc);
+                
+                // 5. Обновляем день недели в RTC если нужно
                 updateDayOfWeekInRTC();
                 
-                // Обновляем системное время из RTC
-                time_t rtc_time = now.unixtime();
-                struct timeval tv = { rtc_time, 0 };
-                settimeofday(&tv, NULL);
-                Serial.println("Системное время обновлено из DS3231");
             } else {
-                Serial.println("\n⚠ DS3231 найден, но время некорректно");
-                setDefaultTime();
+                Serial.println("\n⚠ [DS3231] найден, но время некорректно");
+                
+                // 6. Устанавливаем дефолтное время В ОБА ИСТОЧНИКА
+                setDefaultTimeToAllSources();
             }
-            return;
+            
+            return; // Успешно инициализировали внешние часы
         }
-        if(rtc) delete rtc;
-        rtc = nullptr;
+        
+        // Если инициализация не удалась
+        if(rtc) {
+            delete rtc;
+            rtc = nullptr;
+        }
+        Serial.println("\n✗ Ошибка инициализации DS3231");
     }
-
-    // Если не удалось инициализировать внешние часы
+    
+    // 7. Если не удалось инициализировать внешние часы
     currentTimeSource = INTERNAL_RTC;
     ds3231_available = false;
-    Serial.println("\n✗ DS3231 не обнаружен");
-    setDefaultTime(); // 9:00 6.07.1990 Пятница
+    Serial.println("\n✓ Используются внутренние часы RTC");
+
+    time_t sysTime;
+    time(&sysTime);
+        setDefaultTimeToAllSources();
+        printTimeFromTimeT(sysTime);
+}
+
+time_t getCurrentUTCTime() {
+    // Всегда возвращаем системное время (должно быть UTC)
+    time_t result;
+    time(&result);
+    return result;
+}
+
+time_t convertDateTimeToTimeT(const DateTime& dt) {
+    struct tm tm_time = {0};
+    
+    // Заполняем struct tm (предполагаем UTC)
+    tm_time.tm_year = dt.year() - 1900;
+    tm_time.tm_mon = dt.month() - 1;
+    tm_time.tm_mday = dt.day();
+    tm_time.tm_hour = dt.hour();
+    tm_time.tm_min = dt.minute();
+    tm_time.tm_sec = dt.second();
+    tm_time.tm_isdst = 0; // В UTC нет DST
+    
+    // Временно устанавливаем UTC
+    char* old_tz = getenv("TZ");
+    setenv("TZ", "UTC", 1);
+    tzset();
+    
+    time_t result = mktime(&tm_time);
+    
+    // Восстанавливаем часовой пояс
+    if(old_tz) {
+        setenv("TZ", old_tz, 1);
+    } else {
+        unsetenv("TZ");
+    }
+    tzset();
+    
+    return result;
+}
+
+DateTime convertTimeTToDateTime(time_t utcTime) {
+    struct tm* tm_info = gmtime(&utcTime); // Используем gmtime для UTC
+    
+    return DateTime(
+        tm_info->tm_year + 1900,
+        tm_info->tm_mon + 1,
+        tm_info->tm_mday,
+        tm_info->tm_hour,
+        tm_info->tm_min,
+        tm_info->tm_sec
+    );
+}
+
+void setTimeToAllSources(time_t utcTime) {
+    // 1. Устанавливаем системное время ESP32 (должно быть UTC)
+    struct timeval tv = { utcTime, 0 };
+    settimeofday(&tv, NULL);
+    Serial.println("[RTC] обновлен");
+
+    // 2. Если есть внешний RTC, обновляем и его
+    if(ds3231_available && rtc) {
+        DateTime dt = convertTimeTToDateTime(utcTime);
+        rtc->adjust(dt);
+        Serial.println("[DS3231] обновлен");
+    }
+    
+    Serial.print("Установленное время: ");
+    printTimeFromTimeT(utcTime);
 }
 
 bool syncTime() {
     // Проверяем, инициализирован ли timeClient
     if (!timeClient) {
-        Serial.println("[NTP] Ошибка: timeClient не инициализирован");
+        Serial.println("\n[NTP] Ошибка: timeClient не инициализирован");
         return false;
     }
     
     digitalWrite(LED_PIN, HIGH);
-    Serial.println("[NTP] Попытка синхронизации...");
+    Serial.println("\n[NTP] Попытка синхронизации...");
     
     bool success = false;
     
@@ -102,39 +183,37 @@ bool syncTime() {
         timeClient->setTimeOffset(0); // Запрашиваем UTC
         
         if (timeClient->forceUpdate()) {
+            // Получаем UTC время
             time_t utcTime = timeClient->getEpochTime();
             
             // Проверяем, что время валидное (не 1970 год)
             if (utcTime > 1609459200) { // После 2021-01-01
                 
-                time_t localTime = utcTime + config.time_config.timezone_offset * 3600;
-                if (config.time_config.dst_enabled) {
-                    localTime = mktime(localtime(&localTime)); // Автокоррекция DST
-                }
-                
-                // Отладочный вывод
+                // Выводим полученное UTC время
                 struct tm *tm_utc = gmtime(&utcTime);
-                struct tm *tm_local = localtime(&localTime);
                 Serial.printf("[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d\n", 
                            tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
                            tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
-                Serial.printf("[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)\n",
-                       tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
-                       config.time_config.timezone_offset, config.time_config.dst_enabled ? "ON" : "OFF");
                 
-                // Записываем системное время в UTC
+                // Устанавливаем UTC время в систему
                 struct timeval tv = { utcTime, 0 };
                 settimeofday(&tv, NULL);
-                Serial.println("[RTC] Время NTP записано во внутренний RTC");
+                Serial.println("[NTP]->[RTC] Время записано во внутренний RTC");
                 
-                // Записываем в DS3231 (если подключён)
+                // Записываем в DS3231 ТОЖЕ UTC
                 if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-                    // Для записи в RTC используем локальное время
-                    DateTime rtcTime(localTime);
+                    DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
                     rtc->adjust(rtcTime);
-                    Serial.println("[DS3231] Время NTP в аппаратные часы");
+                    Serial.println("[NTP]->[DS3231] Время записано в аппаратные часы");
                 }
                 
+                // УДАЛЕНА строка с локальным временем и DST
+                // struct tm *tm_local = localtime(&utcTime);
+                // Serial.printf("[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)\n",
+                //        tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
+                //        config.time_config.timezone_offset, 
+                //        config.time_config.dst_enabled ? "ON" : "OFF");
+                              
                 // Обновляем время последней синхронизации в конфиге
                 config.time_config.last_ntp_sync = utcTime;
                 saveConfig();
@@ -169,65 +248,54 @@ bool syncTime() {
     return success;
 }
 
-void setTimeZone(int8_t offset, bool dst_enabled, uint8_t preset_index) {
-    char tz[TZ_BUF_SIZE];
+bool printTime() {
+    time_t utcTime;
+    time(&utcTime);
     
-    if (!dst_enabled) {
-        snprintf(tz, sizeof(tz), "UTC%+d", offset);
-    }
-    else {
-        // Хардкод количества пресетов - у нас 11 элементов в массиве
-        if (preset_index < 11) {
-            strlcpy(tz, DST_PRESETS[preset_index * 3 + 1], sizeof(tz));
+    if (utcTime > 0) {
+        struct tm utc_tm;
+        gmtime_r(&utcTime, &utc_tm);
+        
+        char buf[64];
+        const char* weekday_names[] = {"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"};
+        
+        // ТОЛЬКО UTC:
+        strftime(buf, sizeof(buf), "%a %d.%m.%Y %H:%M:%S UTC", &utc_tm);
+        Serial.print("Время: ");
+        Serial.print(buf);
+        
+        // Источник:
+        if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+            Serial.println(" (DS3231)");
         } else {
-            strlcpy(tz, "UTC0", sizeof(tz));
+            Serial.println(" (System)");
         }
+        
+        // День недели из UTC:
+        Serial.print("День недели: ");
+        Serial.println(weekday_names[utc_tm.tm_wday]);
+        
+        return true;
     }
-
-    setenv("TZ", tz, 1);
-    tzset();
-    Serial.printf("[TZ] Установлен пояс: %s\n", tz);
+    
+    Serial.println("Ошибка получения времени");
+    return false;
 }
 
-bool printTime() {
-  char buf[TIME_BUF_SIZE]; // Объявляем буфер для строки времени
-  bool success = false;    // Флаг успешного получения времени
-  
-  // 1. Пробуем получить время из DS3231 (если подключён)
-  if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-    DateTime now = rtc->now();
-    if (snprintf(buf, sizeof(buf), "%02d:%02d:%02d %02d.%02d.%04d (DS3231)",
-                now.hour(), now.minute(), now.second(),
-                now.day(), now.month(), now.year()) > 0) {
-      success = true;
+void printTimeFromTimeT(time_t utcTime) {
+    // Простая заглушка
+    if (utcTime > 0) {
+        struct tm* tm_info = localtime(&utcTime);
+        Serial.printf("%04d-%02d-%02d %02d:%02d:%02d\n",
+            tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
+            tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
     }
-  }
-
-  // 2. Если DS3231 не сработал, берём время из внутреннего RTC
-  if (!success) {
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-      if (strftime(buf, sizeof(buf), "%H:%M:%S %d.%m.%Y (Internal RTC)", &timeinfo) > 0) {
-        success = true;
-      }
-    } else {
-      // 3. Если getLocalTime() не сработал, берём "сырое" время (с момента запуска)
-      time_t rawTime;
-      time(&rawTime);
-      struct tm *timeinfo = localtime(&rawTime);
-      strftime(buf, sizeof(buf), "%H:%M:%S %d.%m.%Y (Power-On Time)", timeinfo);
-      success = true;
-    }
-  }
-  
-  Serial.print("Текущее время: ");
-  Serial.println(buf);
-  return success;
 }
 
 // Установка времени (часы:минуты:секунды)
 bool setManualTime(const String &timeStr) {
   int hours, minutes, seconds;
+  
   if (sscanf(timeStr.c_str(), "%d:%d:%d", &hours, &minutes, &seconds) != 3) {
     Serial.println("Ошибка формата времени. Используйте HH:MM:SS");
     return false;
@@ -238,95 +306,106 @@ bool setManualTime(const String &timeStr) {
     return false;
   }
 
-  // Получаем текущее время из системы
-  struct tm timeinfo;
-  time_t now;
-  time(&now);
-  localtime_r(&now, &timeinfo);
-
-  // Если дата не была установлена (1970 год), используем дату по умолчанию
-  if (timeinfo.tm_year < 101) { // год менее 2001
-    timeinfo.tm_year = 90;    // 1990 год (90 = 1990-1900)
-    timeinfo.tm_mon = 6;       // июль
-    timeinfo.tm_mday = 6;      // 6 число
-    Serial.println("Установлена дата по умолчанию: 06.07.1990");
+  // 1. Получаем текущую дату в UTC
+  time_t now_utc;
+  time(&now_utc);
+  struct tm utc_time;
+  gmtime_r(&now_utc, &utc_time);
+  
+  // 2. Если дата некорректна (1970), устанавливаем дефолтную
+  if (utc_time.tm_year < 101) { // менее 2001 года
+    utc_time.tm_year = 90;     // 1990
+    utc_time.tm_mon = 6;       // Июль
+    utc_time.tm_mday = 6;      // 6-е число
   }
-
-  // Устанавливаем новое время (дата остаётся прежней)
-  timeinfo.tm_hour = hours;
-  timeinfo.tm_min = minutes;
-  timeinfo.tm_sec = seconds;
-  time_t newTime = mktime(&timeinfo);
-
-  // Применяем изменения
-  struct timeval tv = { newTime, 0 };
+  
+  // 3. Устанавливаем новое время (UTC!)
+  utc_time.tm_hour = hours;
+  utc_time.tm_min = minutes;
+  utc_time.tm_sec = seconds;
+  
+  // 4. Ручной расчет Unix time (чтобы избежать mktime с TZ)
+  // Простая формула для дат после 1970
+  time_t newTime_utc = manualTimeToUnix(&utc_time);
+  
+  // 5. Устанавливаем время
+  struct timeval tv = { newTime_utc, 0 };
   settimeofday(&tv, NULL);
-
-  // Обновляем аппаратные часы (если подключены)
+  
+  // 6. Обновляем RTC (UTC)
   if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-    rtc->adjust(DateTime(newTime));
+    DateTime dt(newTime_utc);
+    rtc->adjust(dt);
   }
-
-  // Сбрасываем счётчик прерываний
-  portENTER_CRITICAL(&timerMux);
-  portEXIT_CRITICAL(&timerMux);
-
-  Serial.println("Время успешно обновлено");
+  
+  // Логирование
+  Serial.printf("Время установлено: %02d:%02d:%02d UTC\n", hours, minutes, seconds);
   return true;
+}
+
+// Вспомогательная функция для ручного расчета Unix time
+time_t manualTimeToUnix(struct tm* tm) {
+  // Упрощенный расчет для дат после 2000 года
+  // В реальном проекте лучше использовать библиотечные функции
+  
+  // Просто используем стандартный mktime с временным UTC
+  char* old_tz = getenv("TZ");
+  setenv("TZ", "UTC", 1);
+  tzset();
+  
+  time_t result = mktime(tm);
+  
+  if (old_tz) {
+    setenv("TZ", old_tz, 1);
+  } else {
+    unsetenv("TZ");
+  }
+  tzset();
+  
+  return result;
 }
 
 // Установка даты (день.месяц.год)
 bool setManualDate(const String &dateStr) {
+    int day, month, year;
+    
+    if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
+        Serial.println("Ошибка формата даты. Используйте DD.MM.YYYY");
+        return false;
+    }
 
-  int day, month, year;
-  if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
-    Serial.println("Ошибка формата даты. Используйте DD.MM.YYYY");
-    return false;
-  }
+    if (day < 1 || day > 31 || month < 1 || month > 12 || year < 2000 || year > 2100) {
+        Serial.println("Ошибка: некорректная дата");
+        return false;
+    }
 
-  if (day < 1 || day > 31 || month < 1 || month > 12 || year < 2000 || year > 2100) {
-    Serial.println("Ошибка: некорректная дата (допустимо 01.01.2000 - 31.12.2100)");
-    return false;
-  }
-
-  // Получаем текущее время из системы
-  struct tm timeinfo;
-  time_t now;
-  time(&now);
-  localtime_r(&now, &timeinfo);
-
-  // Проверяем валидность времени (новый способ)
-  if (timeinfo.tm_hour < 0 || timeinfo.tm_hour > 23 ||
-      timeinfo.tm_min < 0 || timeinfo.tm_min > 59 ||
-      timeinfo.tm_sec < 0 || timeinfo.tm_sec > 59) {
-    // Если время содержит недопустимые значения
-    timeinfo.tm_hour = 9;
-    timeinfo.tm_min = 0;
-    timeinfo.tm_sec = 0;
-    Serial.println("Обнаружены некорректные значения времени, установлено 09:00:00");
-  }
-
-  // Устанавливаем новую дату (время остаётся прежним)
-  timeinfo.tm_mday = day;
-  timeinfo.tm_mon = month - 1;  // январь = 0
-  timeinfo.tm_year = year - 1900;
-  time_t newTime = mktime(&timeinfo);
-
-  // Применяем изменения
-  struct timeval tv = { newTime, 0 };
-  settimeofday(&tv, NULL);
-
-  // Обновляем аппаратные часы (если подключены)
-  if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-    rtc->adjust(DateTime(newTime));
-  }
-
-  // Сбрасываем счётчик прерываний
-  portENTER_CRITICAL(&timerMux);
-  portEXIT_CRITICAL(&timerMux);
-
-  Serial.println("Дата успешно обновлена");
-  return true;
+    // 1. Получаем текущее время
+    time_t now_utc;
+    time(&now_utc);
+    
+    // 2. Берем текущие час/минуту/секунду
+    struct tm utc_time;
+    gmtime_r(&now_utc, &utc_time);
+    
+    // 3. Меняем только дату
+    utc_time.tm_mday = day;
+    utc_time.tm_mon = month - 1;
+    utc_time.tm_year = year - 1900;
+    
+    // 4. Используем существующую функцию из RTClib если есть
+    // Или создаем DateTime напрямую
+    DateTime dt(year, month, day, 
+                utc_time.tm_hour, 
+                utc_time.tm_min, 
+                utc_time.tm_sec);
+    
+    time_t newTime_utc = dt.unixtime();  // RTClib уже дает Unix time!
+    
+    // 5. Устанавливаем
+    setTimeToAllSources(newTime_utc);
+    
+    Serial.printf("Дата установлена: %02d.%02d.%04d UTC\n", day, month, year);
+    return true;
 }
 
 int calculateDayOfWeek(int year, int month, int day) {
@@ -343,33 +422,25 @@ int calculateDayOfWeek(int year, int month, int day) {
 }
 
 // Установка времени по умолчанию: 9:00 6.07.1990 Пятница
-void setDefaultTime() {
-    Serial.println("Установка времени по умолчанию: 09:00 06.07.1990 (пятница)");
+void setDefaultTimeToAllSources() {
+    struct tm default_tm = {0};
+    default_tm.tm_year = 1990 - 1900;
+    default_tm.tm_mon = 7 - 1;
+    default_tm.tm_mday = 6;
+    default_tm.tm_hour = 9;
+    default_tm.tm_min = 0;
+    default_tm.tm_sec = 0;
+    default_tm.tm_isdst = 0;
     
-    struct tm default_time = {0};
-    default_time.tm_year = 1990 - 1900; // 1990 год
-    default_time.tm_mon = 7 - 1;        // Июль (месяцы 0-11)
-    default_time.tm_mday = 6;           // 6 число
-    default_time.tm_hour = 9;           // 9 часов
-    default_time.tm_min = 0;            // 0 минут
-    default_time.tm_sec = 0;            // 0 секунд
-    default_time.tm_isdst = 0;          // Не летнее время
+    // Конвертируем в time_t (UTC)
+    setenv("TZ", "UTC", 1);
+    tzset();
+    time_t default_time = mktime(&default_tm);
+    unsetenv("TZ");
+    tzset();
     
-    // Устанавливаем день недели (пятница = 5 в C стандарте)
-    default_time.tm_wday = calculateDayOfWeek(1990, 7, 6);
-    
-    time_t default_epoch = mktime(&default_time);
-    
-    // Устанавливаем системное время
-    struct timeval tv = { default_epoch, 0 };
-    settimeofday(&tv, NULL);
-    
-    // Если есть внешние часы, обновляем их тоже
-    if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-        rtc->adjust(DateTime(default_epoch));
-        Serial.println("Время по умолчанию записано в DS3231");
-    }
-    
+    // Устанавливаем во все источники
+    setTimeToAllSources(default_time);
 }
 
 // Вспомогательная функция для обновления дня недели в RTC

@@ -30,7 +30,7 @@ void initConfiguration() {
 void initNTPClient() {
     if (!timeClient) {
         timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
-        Serial.printf("\n[NTP] Клиент инициализирован с сервером: %s\n", config.ntp_server);
+        Serial.printf("[NTP] Клиент инициализирован с сервером: %s\n", config.ntp_server);
     }
 }
 
@@ -58,14 +58,7 @@ void setDefaultConfig() {
     config.time_config.auto_timezone = true;      // Разрешить автоопределение
     config.time_config.auto_sync_enabled = true;  // Разрешить автосинхронизацию
     config.time_config.dcf77_enabled = true;      // DCF77 включён
-    
-    config.time_config.timezone_offset = 1;       // UTC+1 по умолчанию
-    config.time_config.dst_enabled = true;
-    config.time_config.dst_preset_index = 3;      // PL пресет
-    strlcpy(config.time_config.dst_rule, 
-            "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00",
-            sizeof(config.time_config.dst_rule));
-    
+        
     config.time_config.sync_interval_hours = 12;  // Синхронизировать каждые 12 часов
     config.time_config.last_ntp_sync = 0;         // Никогда не синхронизировались
     config.time_config.last_dcf77_sync = 0;

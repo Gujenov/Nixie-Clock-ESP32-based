@@ -29,3 +29,4 @@ void IRAM_ATTR onTimeInterrupt();
 void initTimeSource();
 void updateDisplay(time_t now);
 time_t getRTCTime();
+void updateDayOfWeekInRTC();

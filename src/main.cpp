@@ -19,22 +19,24 @@ void setup() {
     
     // 2. Загрузка конфигурации
     initConfiguration();
+    
+    //3.Инициализация NTP клиента
     initNTPClient();
     
-    // 3. Проверка источников времени
+    // 4. Проверка источников времени
     initTimeSource(); 
     
-    // 4. Установка часового пояса
-    setTimeZone(config.time_config.timezone_offset, 
+    // 5. Установка часового пояса
+    /*setTimeZone(config.time_config.timezone_offset, 
                 config.time_config.dst_enabled,
                 config.time_config.dst_preset_index);
-    
-    // 5. Попытка NTP синхронизации (если разрешено)
+    */
+    // 6. Попытка NTP синхронизации (если разрешено)
     if(config.time_config.auto_sync_enabled && strlen(config.wifi_ssid) > 0) {
         syncTime();  // Существующая функция из time_utils.cpp
     }
     
-    // 6. Инициализация DCF77 (если включено)
+    // 7. Инициализация DCF77 (если включено)
     #ifdef ENABLE_DCF77
     if(config.time_config.dcf77_enabled) {
         initDCF77();
@@ -42,11 +44,9 @@ void setup() {
     }
     #endif
     
-    // 7. Настройка прерываний
-    setupInterrupts();
-    
     Serial.println("\n=== Система готова ===");
-    printTime();
+    // 8. Настройка прерываний
+    setupInterrupts();
 }
 
 void loop() {
@@ -92,7 +92,7 @@ void loop() {
     if (currentMillis - lastSyncCheck >= 60000) { // Проверяем раз в минуту
         lastSyncCheck = currentMillis;
         
-        time_t now = getCurrentTime();
+        time_t now = getCurrentUTCTime();
         struct tm* tm_now = localtime(&now);
         
         // Проверяем полночь и полдень
@@ -149,7 +149,7 @@ void loop() {
 
 // Вспомогательная функция для обработки обновления времени
 void processTimeUpdate() {
-    time_t currentTime = getCurrentTime();
+    time_t currentTime = getCurrentUTCTime();
     
     // Выводим в Serial каждые 20 секунд
     if (printEnabled) {

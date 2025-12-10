@@ -33,14 +33,14 @@ void setupInterrupts() {
     rtc->writeSqwPinMode(DS3231_SquareWave1Hz);
     pinMode(SQW_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(SQW_PIN), onTimeInterrupt, FALLING);
-    Serial.println("Используются аппаратные прерывания SQW");
+    Serial.println("Используется прерывание от DS3231");
   } else {
     // Настройка таймера для ESP32-S3 (240 MHz)
     timer = timerBegin(0, TIMER_DIVIDER, true);  // Таймер 0, делитель 80, счет вверх
     timerAttachInterrupt(timer, onTimeInterrupt, true);
     timerAlarmWrite(timer, TIMER_INTERVAL, true);  // 3,000,000 тиков, автоповтор
     timerAlarmEnable(timer);  // Включаем таймер
-    Serial.println("Используется программный таймер");
+    Serial.println("Прерывания от внутреннего таймера настроены (DS3231 не доступен)");
   }
 }
 

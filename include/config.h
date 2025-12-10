@@ -37,13 +37,7 @@ struct TimeConfig {
     bool auto_timezone;          // Автоопределение пояса (true = разрешить менять)
     bool auto_sync_enabled;      // Автосинхронизация разрешена
     bool dcf77_enabled;          // Использовать DCF77
-    
-    // Настройки времени
-    int8_t timezone_offset;      // Часовой пояс (например, +2)
-    bool dst_enabled;            // Летнее время включено
-    uint8_t dst_preset_index;    // Индекс пресета DST
-    char dst_rule[64];           // Правила DST
-    
+        
     // Синхронизация
     uint8_t sync_interval_hours; // Интервал синхронизации (часы)
     uint32_t last_ntp_sync;      // Время последней NTP синхронизации (UNIX time)

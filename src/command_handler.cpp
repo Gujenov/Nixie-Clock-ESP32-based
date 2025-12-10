@@ -1,7 +1,6 @@
 #include "command_handler.h"
 #include "config.h"
 #include "time_utils.h"
-#include "dst_handler.h"
 #include "alarm_handler.h"
 #include "button_handler.h"
 
@@ -36,34 +35,27 @@ void handleSerialCommands() {
     printSettings();
   }
   else if(command.equals("time") || command.equals("LT")) {
-    // Локальное время (Local Time)
-    Serial.println("=== Local Time ===");
-    time_t currentTime = getCurrentTime();  // Используем существующую функцию
+    time_t currentTime = getCurrentUTCTime();  // Используем существующую функцию
     struct tm* timeinfo = localtime(&currentTime);
     char buffer[32];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", timeinfo);
+    strftime(buffer, sizeof(buffer), "Local: %Y-%m-%d %H:%M:%S %Z", timeinfo);
     Serial.println(buffer);
   }
   else if(command.equals("utc") || command.equals("UTC")) {
-    // UTC время
-    Serial.println("=== UTC Time ===");
-    time_t utcTime = getCurrentTime();  // getCurrentTime уже возвращает UTC
+    time_t utcTime = getCurrentUTCTime();  // getCurrentTime уже возвращает UTC
     struct tm* timeinfo = gmtime(&utcTime);
     char buffer[32];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S UTC", timeinfo);
+    strftime(buffer, sizeof(buffer), "UTC: %Y-%m-%d %H:%M:%S", timeinfo);
     Serial.println(buffer);
-    Serial.print("(Timestamp: ");
-    Serial.print(utcTime);
-    Serial.println(")");
   }
   else if(command.equals("WF")){ 
     Serial.printf("WiFi SSID: %s\n", config.wifi_ssid);
     Serial.printf("NTP сервер: %s\n", config.ntp_server);
   }
-  else if(command.equals("timeinfo") || command.equals("ti")) {
+  /*else if(command.equals("timeinfo") || command.equals("ti")) {
     // Полная информация о времени
     Serial.println("\n=== Current Time Information ===");
-    time_t currentTime = getCurrentTime();
+    time_t currentTime = getCurrentUTCTime();
     
     // UTC время
     struct tm* utc_tm = gmtime(&currentTime);
@@ -101,7 +93,7 @@ void handleSerialCommands() {
         Serial.print(" (DST enabled)");
     }
     Serial.println();
-  }
+  }*/
   else if(command.equals("timesource") || command.equals("ts")) {
     // Информация об источнике времени
     Serial.print("Current time source: ");
@@ -142,7 +134,7 @@ void handleSerialCommands() {
         Serial.println("NTP сервер обновлен");
     }
 }
-  else if(command.startsWith("set tz ")) {
+  /*else if(command.startsWith("set tz ")) {
     int8_t tz = command.substring(7).toInt();
     if(tz >= -12 && tz <= 14) {
       config.time_config.timezone_offset = tz;
@@ -193,7 +185,7 @@ void handleSerialCommands() {
     for (int i = 0; DST_PRESETS[i] != nullptr; i += 2) {
         Serial.printf("%d: %s -> %s\n", i/2, DST_PRESETS[i], DST_PRESETS[i+1]);
     }
-  }
+  }*/
   else if(command.startsWith("set sn ")) {
     String sn = command.substring(7);
     if(sn.length() == 11) {
@@ -209,9 +201,9 @@ void handleSerialCommands() {
     Serial.printf("SSID: %s\n", config.wifi_ssid);
     Serial.printf("Пароль: %s\n", config.wifi_pass);
     Serial.printf("NTP сервер: %s\n", config.ntp_server);
-    Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
-    Serial.printf("DST enabled: %s\n", config.time_config.dst_enabled ? "Yes" : "No");
-    Serial.printf("DST preset: %d\n", config.time_config.dst_preset_index);
+  //Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
+  //  Serial.printf("DST enabled: %s\n", config.time_config.dst_enabled ? "Yes" : "No");
+  //  Serial.printf("DST preset: %d\n", config.time_config.dst_preset_index);
     Serial.printf("Серийный номер: %s\n", config.serial_number);
     Serial.printf("Будильник 1: %s %02d:%02d\n", 
         config.alarm1.enabled ? "Вкл" : "Выкл",
@@ -259,7 +251,7 @@ void handleSerialCommands() {
       strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
       Serial.println(buffer);
       
-      time_t now = getCurrentTime();
+      time_t now = getCurrentUTCTime();
       time_t diff = now - config.time_config.last_ntp_sync;
       Serial.print("Time since last sync: ");
       Serial.print(diff);
@@ -279,10 +271,10 @@ void handleSerialCommands() {
     Serial.printf("DS3231 available: %s\n", ds3231_available ? "true" : "false");
     Serial.printf("WiFi SSID: %s\n", config.wifi_ssid);
     Serial.printf("NTP server: %s\n", config.ntp_server);
-    Serial.printf("Timezone offset: %d\n", config.time_config.timezone_offset);
-    Serial.printf("DST enabled: %s\n", config.time_config.dst_enabled ? "true" : "false");
+  //  Serial.printf("Timezone offset: %d\n", config.time_config.timezone_offset);
+  //  Serial.printf("DST enabled: %s\n", config.time_config.dst_enabled ? "true" : "false");
     
-    time_t now = getCurrentTime();
+    time_t now = getCurrentUTCTime();
     struct tm* utc = gmtime(&now);
     char buffer[32];
     strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S UTC", utc);
@@ -311,8 +303,8 @@ void printHelp() {
   Serial.println("reset config   - сбросить настройки к значениям по умолчанию");
 
   Serial.println("\nhelp            - показать это сообщение");
-  Serial.println(" info          - Информация о системе");
-  Serial.println(" espinfo       - показать информацию об ESP32");
+  Serial.println("info          - Информация о системе");
+  Serial.println("espinfo       - показать информацию об ESP32");
 
   Serial.println("\nsetup          - Вход в режим настройки");
   Serial.println("out            - Выход из режима настройки");
@@ -324,7 +316,7 @@ void printSystemInfo() {
   Serial.println("\n=== Системная информация ===");
   Serial.printf("Версия ПО: %s\n", FIRMWARE_VERSION);
   Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
-  Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
+//  Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
   Serial.printf("Источник времени: %s\n", 
                currentTimeSource == EXTERNAL_DS3231 ? "DS3231" : "Внутренний RTC");
    
