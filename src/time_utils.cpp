@@ -53,6 +53,10 @@ void initTimeSource() {
             
             return; // Успешно инициализировали внешние часы
         }
+            else {
+            delete rtc; // <-- Важно: освобождаем при неудаче
+            rtc = nullptr;
+            }
         
         // Если инициализация не удалась
         if(rtc) {
@@ -257,7 +261,6 @@ bool printTime() {
         gmtime_r(&utcTime, &utc_tm);
         
         char buf[64];
-        const char* weekday_names[] = {"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"};
         
         // ТОЛЬКО UTC:
         strftime(buf, sizeof(buf), "%a %d.%m.%Y %H:%M:%S UTC", &utc_tm);
@@ -271,9 +274,6 @@ bool printTime() {
             Serial.println(" (System)");
         }
         
-        // День недели из UTC:
-        Serial.print("День недели: ");
-        Serial.println(weekday_names[utc_tm.tm_wday]);
         
         return true;
     }

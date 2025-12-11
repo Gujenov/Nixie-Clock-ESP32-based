@@ -5,6 +5,7 @@
 #include "input_handler.h"
 #include "alarm_handler.h"
 #include "time_utils.h"
+#include "dcf77_handler.h"
 
 // Для периодической синхронизации
 unsigned long lastWiFiSyncCheck = 0;
@@ -36,17 +37,16 @@ void setup() {
         syncTime();  // Существующая функция из time_utils.cpp
     }
     
-    // 7. Инициализация DCF77 (если включено)
-    #ifdef ENABLE_DCF77
+    // 7. Инициализация DCF77
     if(config.time_config.dcf77_enabled) {
-        initDCF77();
-        // Запуск таймера ожидания
+    initDCF77();
+    updateDCF77(); // Начинаем приём DCF77
     }
-    #endif
-    
+  
     Serial.println("\n=== Система готова ===");
     // 8. Настройка прерываний
     setupInterrupts();
+    
 }
 
 void loop() {
@@ -68,42 +68,46 @@ void loop() {
     
     // === 3. ОБНОВЛЕНИЕ ВРЕМЕНИ ===
     if (timeUpdated) {
-        portENTER_CRITICAL(&timerMux);
-        timeUpdated = false;
-        portEXIT_CRITICAL(&timerMux);
+    portENTER_CRITICAL(&timerMux);
+    timeUpdated = false;
+    portEXIT_CRITICAL(&timerMux);
+    
+    static time_t lastTime = 0;
+    time_t currentTime = getCurrentUTCTime();  // <--- ПОЛУЧАЕМ ТЕКУЩЕЕ ВРЕМЯ
+    
+    if (currentTime != lastTime) {
+        lastTime = currentTime;
         
+        // Вывод каждые 20 секунд
+        struct tm* tm_info = gmtime(&currentTime);
+        if (tm_info->tm_sec % 20 == 0 && printEnabled) {
+            printTime();
+        }
+
+        checkAlarms();  // Проверка будильников раз в секунду
+    }
+    }
+
+    // Или секундный тик для внутренних часов
+    else if (currentTimeSource == INTERNAL_RTC) {
+    if (currentMillis - lastSecondTick >= 1000) {
+        lastSecondTick = currentMillis;
+        
+        time_t currentTime = getCurrentUTCTime(); 
         static time_t lastTime = 0;
         
-        if (now != lastTime) {
-            lastTime = now;
+        if (currentTime != lastTime) {
+            lastTime = currentTime;
             
-            // Вывод каждые 20 секунд
-            struct tm* tm_info = gmtime(&now);
+            struct tm* tm_info = gmtime(&currentTime);
             if (tm_info->tm_sec % 20 == 0 && printEnabled) {
                 printTime();
             }
+            
+            checkAlarms();  // Проверка будильников раз в секунду
         }
     }
-    // Или секундный тик для внутренних часов
-    else if (currentTimeSource == INTERNAL_RTC) {
-        if (currentMillis - lastSecondTick >= 1000) {
-            lastSecondTick = currentMillis;
-            
-            time_t now = getCurrentUTCTime();
-            static time_t lastTime = 0;
-            
-            if (now != lastTime) {
-                lastTime = now;
-                
-                struct tm* tm_info = gmtime(&now);
-                if (tm_info->tm_sec % 20 == 0 && printEnabled) {
-                    printTime();
-                }
-                
-                checkAlarms();  // Проверка будильников раз в секунду
-            }
-        }
-    }
+}
     
     // === 4. ПЕРИОДИЧЕСКАЯ СИНХРОНИЗАЦИЯ ===
     if (currentMillis - lastSyncCheck >= 60000) { // Каждую минуту
