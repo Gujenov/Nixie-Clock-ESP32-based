@@ -60,8 +60,3 @@ void IRAM_ATTR onTimeInterrupt() {
     digitalWrite(LED_PIN, HIGH);
     portEXIT_CRITICAL_ISR(&timerMux);
 }
-
-
-void updateDisplay(time_t now) {
-    digitalWrite(LED_PIN, LOW);
-}

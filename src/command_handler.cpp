@@ -2,13 +2,14 @@
 #include "config.h"
 #include "time_utils.h"
 #include "alarm_handler.h"
-#include "button_handler.h"
+#include "input_handler.h"
 
 // Объявляем внешние переменные из time_utils.cpp
 extern WiFiUDP ntpUDP;
 extern NTPClient *timeClient;
 extern HardwareSource currentTimeSource;  // Из hardware.h
 extern bool ds3231_available;             // Из hardware.h
+extern bool printEnabled;
 
 void printHelp();
 void printSystemInfo();
