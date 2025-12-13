@@ -1,5 +1,5 @@
 MCU.HW_VARIANT.RELEASE_TYPE.BUILD
-
+set time 11:59:58
 
 ### Структура:
 - **MCU** (1 символ) - семейство контроллера

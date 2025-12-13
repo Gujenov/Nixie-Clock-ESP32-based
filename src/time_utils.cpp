@@ -11,7 +11,7 @@ void checkTimeSource() {
     static bool firstRun = true;
     
     if (firstRun) {
-        // ПЕРВЫЙ ВЫЗОВ: инициализация (заменяем initTimeSource())
+        // ПЕРВЫЙ ВЫЗОВ: полная инициализация
         firstRun = false;
         
         Wire.begin(I2C_SDA, I2C_SCL);
@@ -36,18 +36,26 @@ void checkTimeSource() {
                     Serial.println("\n✓ DS3231 инициализирован");
                 } else {
                     // Время некорректно
-                    delete rtc;
-                    rtc = nullptr;
                     currentTimeSource = INTERNAL_RTC;
                     ds3231_available = false;
                     Serial.println("\n⚠ DS3231 найден, но время некорректно");
                     setDefaultTimeToAllSources();
                 }
+            } else {
+                // Ошибка инициализации RTClib
+                if (rtc) {
+                    delete rtc;
+                    rtc = nullptr;
+                }
+                currentTimeSource = INTERNAL_RTC;
+                ds3231_available = false;
+                Serial.println("\n✗ Ошибка инициализации DS3231");
+                setDefaultTimeToAllSources();
             }
-        }
-        
-        if (!ds3231_available) {
+        } else {
+            // DS3231 не найден на I2C
             currentTimeSource = INTERNAL_RTC;
+            ds3231_available = false;
             Serial.println("\n✓ Используются внутренние часы RTC");
             setDefaultTimeToAllSources();
         }
@@ -57,19 +65,58 @@ void checkTimeSource() {
         return;
     }
     
-    // ПОСЛЕДУЮЩИЕ ВЫЗОВЫ: только проверка доступности
-    if (currentTimeSource == EXTERNAL_DS3231) {
-        // Проверяем, доступен ли еще DS3231
+    // ПОСЛЕДУЮЩИЕ ВЫЗОВЫ: только проверка и смена источника при необходимости
+    
+    // Проверяем доступность DS3231
+    bool ds3231_now_available = false;
+    if (rtc) {
         Wire.beginTransmission(0x68);
-        bool stillAvailable = (Wire.endTransmission() == 0);
-        
-        if (!stillAvailable && ds3231_available) {
-            // DS3231 пропал!
-            ds3231_available = false;
-            currentTimeSource = INTERNAL_RTC;
-            Serial.println("[TIME] ⚠ DS3231 отключился, переключаюсь на System RTC");
-        }
+        ds3231_now_available = (Wire.endTransmission() == 0);
     }
+    
+    // Если статус изменился
+        
+        if (ds3231_now_available != ds3231_available) {
+        ds3231_available = ds3231_now_available;
+        
+        if (ds3231_available) {
+            // DS3231 подключился
+            currentTimeSource = EXTERNAL_DS3231;
+
+            DateTime now = rtc->now();
+            time_t rtc_utc = convertDateTimeToTimeT(now);
+            
+            // Сравниваем с системным временем
+            time_t sys_time;
+            time(&sys_time);
+            time_t diff = abs(rtc_utc - sys_time);
+            
+            // Если расхождение больше 5 секунд - синхронизируем
+            if (diff > 5) {
+                struct timeval tv = { rtc_utc, 0 };
+                settimeofday(&tv, NULL);
+                Serial.printf("[TIME] DS3231 подключен, синхронизация (расхождение: %ld сек)\n", diff);
+            } else {
+                Serial.println("[TIME] DS3231 подключен, время совпадает");
+            }
+            
+        } else {
+            // DS3231 отключился
+            currentTimeSource = INTERNAL_RTC;
+            
+            // Запоминаем последнее известное время DS3231
+            static time_t lastKnownDS3231Time = 0;
+            if (rtc) {
+                DateTime now = rtc->now();
+                lastKnownDS3231Time = convertDateTimeToTimeT(now);
+            }
+            
+            Serial.println("[TIME] DS3231 отключен, использую System RTC");
+        }
+        
+        setupInterrupts();
+    }
+    
 }
 
 time_t getCurrentUTCTime() {
