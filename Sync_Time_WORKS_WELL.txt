@@ -1,0 +1,107 @@
+bool syncTime() {
+    // Проверяем, инициализирован ли timeClient
+    if (!timeClient) {
+        Serial.println("\n[NTP] Ошибка: timeClient не инициализирован");
+        return false;
+    }
+    
+    digitalWrite(LED_PIN, HIGH);
+    Serial.println("\n[NTP] Попытка синхронизации...");
+    
+    bool success = false;
+    
+    // 1. Включаем WiFi
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(config.wifi_ssid, config.wifi_pass);
+    
+    // 2. Ждем подключения с таймаутом
+    int attempts = 0;
+    Serial.print("[WiFi] Подключение");
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    Serial.println();
+    
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[NTP] Ошибка: не удалось подключиться к WiFi");
+        digitalWrite(LED_PIN, LOW);
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+    
+    Serial.printf("[WiFi] Подключено к %s\n", config.wifi_ssid);
+    Serial.printf("[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
+    
+    // 3. Пробуем синхронизироваться с NTP
+    try {
+        timeClient->begin();
+        timeClient->setTimeOffset(0); // Запрашиваем UTC
+        
+        if (timeClient->forceUpdate()) {
+            // Получаем UTC время
+            time_t utcTime = timeClient->getEpochTime();
+            
+            // Проверяем, что время валидное (не 1970 год)
+            if (utcTime > 1609459200) { // После 2021-01-01
+                
+                // Выводим полученное UTC время
+                struct tm *tm_utc = gmtime(&utcTime);
+                Serial.printf("[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d\n", 
+                           tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
+                           tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
+                
+                // Устанавливаем UTC время в систему
+                struct timeval tv = { utcTime, 0 };
+                settimeofday(&tv, NULL);
+                Serial.println("[NTP]->[RTC] Время записано во внутренний RTC");
+                
+                // Записываем в DS3231 ТОЖЕ UTC
+                if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+                    DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
+                    rtc->adjust(rtcTime);
+                    Serial.println("[NTP]->[DS3231] Время записано в аппаратные часы");
+                }
+                
+                // УДАЛЕНА строка с локальным временем и DST
+                // struct tm *tm_local = localtime(&utcTime);
+                // Serial.printf("[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)\n",
+                //        tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
+                //        config.time_config.timezone_offset, 
+                //        config.time_config.dst_enabled ? "ON" : "OFF");
+                              
+                // Обновляем время последней синхронизации в конфиге
+                config.time_config.last_ntp_sync = utcTime;
+                saveConfig();
+                
+                success = true;
+                digitalWrite(LED_PIN, LOW);
+            } else {
+                Serial.println("[NTP] Ошибка: получено некорректное время");
+            }
+        } else {
+            Serial.println("[NTP] Ошибка: forceUpdate() не удался");
+        }
+        
+        timeClient->end();
+    } catch (...) {
+        Serial.println("[NTP] Исключение при синхронизации!");
+    }
+    
+    // 4. Отключаем WiFi
+    Serial.println("[WiFi] Отключение...");
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.mode(WIFI_OFF);
+    
+    if (!success) {
+        blinkError(11);
+        Serial.println("[NTP] Не удалось синхронизировать время!");
+    } else {
+        Serial.println("[NTP] Синхронизация успешна!");
+    }
+    
+    return success;
+}

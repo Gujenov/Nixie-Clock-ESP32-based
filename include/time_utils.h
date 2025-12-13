@@ -20,6 +20,7 @@ time_t getCurrentUTCTime();
 
 // 2. Единые операции с временем
 time_t getCurrentUTCTime();                    // Основная: всегда возвращает UTC
+void checkTimeSource();                        // Проверка и инициализация источников времени
 void setTimeToAllSources(time_t utcTime);      // Установка во все источники
 void setDefaultTimeToAllSources();             // Сброс к 9:00 6.07.1990 UTC
 

@@ -7,11 +7,9 @@
 #include "time_utils.h"
 #include "dcf77_handler.h"
 
-// Для периодической синхронизации
-unsigned long lastWiFiSyncCheck = 0;
-#define WIFI_SYNC_INTERVAL (12 * 3600 * 1000) // 12 часов
 
 extern bool printEnabled;
+
 
 void setup() {
 
@@ -25,7 +23,7 @@ void setup() {
     initNTPClient();
     
     // 4. Проверка источников времени
-    initTimeSource(); 
+    checkTimeSource(); 
     
     // 5. Установка часового пояса
     /*setTimeZone(config.time_config.timezone_offset, 
@@ -44,8 +42,6 @@ void setup() {
     }
   
     Serial.println("\n=== Система готова ===");
-    // 8. Настройка прерываний
-    setupInterrupts();
     
 }
 
@@ -54,74 +50,60 @@ void loop() {
     static unsigned long lastSyncCheck = 0;
     static unsigned long lastSecondTick = 0;
     unsigned long currentMillis = millis();
+    static time_t lastTime = 0;
     
-    // === 1. SERIAL КОМАНДЫ (приоритет) ===
+    // === 1. SERIAL КОМАНДЫ ===
     if (Serial.available()) {
         handleSerialCommands();
     }
     
-    // === 2. ВВОД С КНОПКИ И ЭНКОДЕРА (каждые 20ms) ===
+    // === 2. ВВОД С КНОПКИ И ЭНКОДЕРА ===
     if (currentMillis - lastInputCheck >= 20) {
         lastInputCheck = currentMillis;
-        processAllInputs();  // Всё в одной функции!
+        processAllInputs();
     }
     
-    // === 3. ОБНОВЛЕНИЕ ВРЕМЕНИ ===
+    // === 3. СБРОС ФЛАГА ПРЕРЫВАНИЯ ===
     if (timeUpdated) {
-    portENTER_CRITICAL(&timerMux);
-    timeUpdated = false;
-    portEXIT_CRITICAL(&timerMux);
-    
-    static time_t lastTime = 0;
-    time_t currentTime = getCurrentUTCTime();  // <--- ПОЛУЧАЕМ ТЕКУЩЕЕ ВРЕМЯ
-    
-    if (currentTime != lastTime) {
-        lastTime = currentTime;
-        
-        // Вывод каждые 20 секунд
-        struct tm* tm_info = gmtime(&currentTime);
-        if (tm_info->tm_sec % 20 == 0 && printEnabled) {
-            printTime();
-        }
-
-        checkAlarms();  // Проверка будильников раз в секунду
+        portENTER_CRITICAL(&timerMux);
+        timeUpdated = false;
+        portEXIT_CRITICAL(&timerMux);
     }
-    }
-
-    // Или секундный тик для внутренних часов
-    else if (currentTimeSource == INTERNAL_RTC) {
+    
+    // === 4. СЕКУНДНЫЕ ОПЕРАЦИИ (ЕДИНЫЕ ДЛЯ ВСЕХ ИСТОЧНИКОВ) ===
     if (currentMillis - lastSecondTick >= 1000) {
         lastSecondTick = currentMillis;
         
-        time_t currentTime = getCurrentUTCTime(); 
-        static time_t lastTime = 0;
+        time_t currentTime = getCurrentUTCTime();
         
         if (currentTime != lastTime) {
             lastTime = currentTime;
             
             struct tm* tm_info = gmtime(&currentTime);
-            if (tm_info->tm_sec % 20 == 0 && printEnabled) {
+            uint8_t currentHour = tm_info->tm_hour;
+            uint8_t currentMinute = tm_info->tm_min;
+            uint8_t currentSecond = tm_info->tm_sec;
+            
+            // 1. Будильники
+            checkAlarms();
+            
+            // 2. Вывод времени
+            if (printEnabled && currentSecond % 20 == 0) {
                 printTime();
             }
+                            
+                if((currentHour == 0 || currentHour == 12) && 
+                                  currentMinute == 0 && 
+                                  currentSecond == 0){
+                                    syncTime();}
+                
+                    
+                    
             
-            checkAlarms();  // Проверка будильников раз в секунду
-        }
-    }
-}
-    
-    // === 4. ПЕРИОДИЧЕСКАЯ СИНХРОНИЗАЦИЯ ===
-    if (currentMillis - lastSyncCheck >= 60000) { // Каждую минуту
-        lastSyncCheck = currentMillis;
-        
-        if (config.time_config.auto_sync_enabled && 
-            strlen(config.wifi_ssid) > 0 &&
-            currentMillis - lastWiFiSyncCheck >= WIFI_SYNC_INTERVAL) {
-            
-            lastWiFiSyncCheck = currentMillis;
-            Serial.println("[SYNC] Periodic NTP sync");
-            syncTime();
         }
     }
     
-    delay(1);
+    // === 6. ОБРАБОТКА DCF77 ===
+
+    delay(10);
 }
