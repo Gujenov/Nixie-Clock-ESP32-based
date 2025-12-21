@@ -35,12 +35,12 @@ void setup() {
         syncTime();  // Существующая функция из time_utils.cpp
     }
     
-    // 7. Инициализация DCF77
+    /* 7. Инициализация DCF77
     if(config.time_config.dcf77_enabled) {
     initDCF77();
     updateDCF77(); // Начинаем приём DCF77
     }
-  
+  */
     Serial.println("\n=== Система готова ===");
     
 }

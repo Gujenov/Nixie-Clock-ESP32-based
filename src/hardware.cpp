@@ -29,6 +29,59 @@ void initHardware() {
 }
 
 void setupInterrupts() {
+    static bool interruptsInitialized = false;
+    
+    // Если прерывания уже настроены для текущего источника - ничего не делаем
+    static HardwareSource lastConfiguredSource = INTERNAL_RTC;
+    if (interruptsInitialized && lastConfiguredSource == currentTimeSource) {
+        return;  // Уже настроены для этого источника
+    }
+    
+    // Если были настроены прерывания от другого источника - отключаем старые
+    if (interruptsInitialized) {
+        if (lastConfiguredSource == EXTERNAL_DS3231) {
+            // Отключаем прерывание от DS3231
+            detachInterrupt(digitalPinToInterrupt(SQW_PIN));
+        } else {
+            // Отключаем внутренний таймер
+            if (timer) {
+                timerAlarmDisable(timer);
+                // timerDetachInterrupt(timer); // Можно раскомментировать если нужно
+            }
+        }
+    }
+    
+    // Настраиваем новые прерывания
+    if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+        // Прерывание от DS3231
+        rtc->writeSqwPinMode(DS3231_SquareWave1Hz);
+        pinMode(SQW_PIN, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(SQW_PIN), onTimeInterrupt, FALLING);
+        
+        if (!interruptsInitialized || lastConfiguredSource != EXTERNAL_DS3231) {
+            Serial.println("Используется прерывание от DS3231");
+        }
+        
+    } else {
+        // Внутренний таймер ESP32
+        if (!timer) {
+            timer = timerBegin(0, TIMER_DIVIDER, true);
+            timerAttachInterrupt(timer, onTimeInterrupt, true);
+            timerAlarmWrite(timer, TIMER_INTERVAL, true);
+        }
+        timerAlarmEnable(timer);
+        
+        if (!interruptsInitialized || lastConfiguredSource != INTERNAL_RTC) {
+            Serial.println("Прерывания от внутреннего таймера настроены (DS3231 не доступен)");
+        }
+    }
+    
+    interruptsInitialized = true;
+    lastConfiguredSource = currentTimeSource;
+}
+
+/*
+void setupInterrupts() {
   if(currentTimeSource == EXTERNAL_DS3231 && rtc) {
     rtc->writeSqwPinMode(DS3231_SquareWave1Hz);
     pinMode(SQW_PIN, INPUT_PULLUP);
@@ -43,6 +96,7 @@ void setupInterrupts() {
     Serial.println("Прерывания от внутреннего таймера настроены (DS3231 не доступен)");
   }
 }
+*/
 
 void blinkError(int count) {
   pinMode(LED_PIN, OUTPUT);
