@@ -227,11 +227,11 @@ void handleSerialCommands() {
     timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
     Serial.println("Конфигурация сброшена к значениям по умолчанию");
   }
-  else if (command.startsWith("set time ")|| command.equals("ST")) {
+  else if (command.startsWith("set time ")|| command.equals("ST ")) {
     String timeStr = command.substring(9);
     setManualTime(timeStr);
   }
-  else if (command.startsWith("set date ")|| command.equals("SD")) {
+  else if (command.startsWith("set date ")|| command.equals("SD ")) {
     String dateStr = command.substring(9);
     setManualDate(dateStr);
   }

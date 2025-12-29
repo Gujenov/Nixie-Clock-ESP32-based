@@ -5,14 +5,14 @@
 #include <NTPClient.h>
 
 // Версии и размеры буферов
-//MCU.HW_VARIANT.RELEASE_TYPE.BUILD
+// MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
 #define FIRMWARE_VERSION "1.A0.3.251229"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
 #define NTP_SERVER_SIZE 32
 
-// Конфигурация пинов (только общие, специфичные - в hardware.h)
+// Конфигурация пинов
 #define LED_PIN 48
 
 // Настройки таймера
@@ -25,6 +25,10 @@
 #define BUTTON_LONG     2
 #define BUTTON_VERY_LONG 3
 
+// Часовые пояса по умолчанию
+#define DEFAULT_TIMEZONE_OFFSET 3    // UTC+3 (Москва)
+#define DEFAULT_DST_ENABLED true     // Использовать летнее время
+
 struct AlarmSettings {
     uint8_t hour;
     uint8_t minute;
@@ -34,9 +38,13 @@ struct AlarmSettings {
 struct TimeConfig {
     // Флаги управления
     bool manual_time_set;        // Время установлено вручную
-    bool auto_timezone;          // Автоопределение пояса (true = разрешить менять)
+    bool auto_timezone;          // Автоопределение пояса
     bool auto_sync_enabled;      // Автосинхронизация разрешена
     bool dcf77_enabled;          // Использовать DCF77
+    
+    // Часовой пояс
+    int8_t timezone_offset;      // Смещение от UTC в часах
+    bool dst_enabled;            // Использовать летнее время
         
     // Синхронизация
     uint8_t sync_interval_hours; // Интервал синхронизации (часы)
@@ -51,7 +59,7 @@ struct Config {
     char wifi_pass[32];
     char ntp_server[NTP_SERVER_SIZE];
     
-    // ВСЁ, связанное со временем - в TimeConfig
+    // Настройки времени
     TimeConfig time_config;
     
     // Системные настройки
@@ -67,7 +75,7 @@ enum HardwareSource { INTERNAL_RTC, EXTERNAL_DS3231 };
 extern HardwareSource currentTimeSource;
 extern Config config;
 extern Preferences preferences;
-extern NTPClient *timeClient;  // Объявляем как extern
+extern NTPClient *timeClient;
 
 void initConfiguration();
 void setDefaultConfig();
