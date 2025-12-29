@@ -227,11 +227,11 @@ void handleSerialCommands() {
     timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
     Serial.println("Конфигурация сброшена к значениям по умолчанию");
   }
-  else if (command.startsWith("set time ")) {
+  else if (command.startsWith("set time ")|| command.equals("ST")) {
     String timeStr = command.substring(9);
     setManualTime(timeStr);
   }
-  else if (command.startsWith("set date ")) {
+  else if (command.startsWith("set date ")|| command.equals("SD")) {
     String dateStr = command.substring(9);
     setManualDate(dateStr);
   }
@@ -329,11 +329,11 @@ void printSystemInfo() {
 
 void printSettings() {
   Serial.println("\n=== Доступные настройки ===");
-  Serial.println("\n-=ВНИМАНИЕ! До подачи команды ''out'' время в терминал не выдаётся=-\n");
+  Serial.println("\n-=ВНИМАНИЕ! До подачи команды ''out'' выдача времени остановлена=-\n");
 
   Serial.println("\n========TIME=============");
-  Serial.println("set time [HH:MM:SS] - установить время вручную");
-  Serial.println("set date [DD.MM.YYYY] - установить дату вручную");
+  Serial.println("set time, ST [HH:MM:SS] - установить время вручную");
+  Serial.println("set date, SD [DD.MM.YYYY] - установить дату вручную");
   Serial.println("set tz [OFFSET] - изменить часовой пояс (-12..14)");
   Serial.println("show dst - показать доступные DST пресеты");
   Serial.println("set dst [0-4] - выбрать DST пресет");
@@ -348,8 +348,8 @@ void printSettings() {
   Serial.println("\n========DEVICE==========");
   Serial.println("set sn [SERIAL] - изменить серийный номер (11 символов)");
   Serial.println("reset config - сбросить настройки к значениям по умолчанию");
-  Serial.println("out - выход из меню настроек");
-  Serial.println("==========================\n");  
+  Serial.println("==========================\n"); 
+  Serial.println("\n out - выход из меню настроек"); 
 }
 
 void printESP32Info() {

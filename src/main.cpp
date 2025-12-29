@@ -21,7 +21,7 @@ void setup() {
     
     //3.Инициализация NTP клиента
     initNTPClient();
-    
+       
     // 4. Проверка источников времени
     checkTimeSource(); 
     

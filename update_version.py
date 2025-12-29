@@ -63,21 +63,29 @@ def update_version(project_dir=None):
 
 # Точка входа для PlatformIO - ОБЯЗАТЕЛЬНО вызывается перед компиляцией
 # PlatformIO ищет функцию, которой можно передать env объект
-def main(env=None):
+def main(env):
     """Функция, вызываемая PlatformIO перед сборкой"""
-    if env is None:
-        project_dir = os.getcwd()
-    else:
-        project_dir = env.get('PROJECT_DIR', os.getcwd())
-    
     print("\n[PRE-BUILD] Обновление версии прошивки...", flush=True)
+    
+    project_dir = env.get('PROJECT_DIR', os.getcwd())
     success = update_version(project_dir)
+    
     if success:
         print("[PRE-BUILD] ✅ Версия готова к компиляции\n", flush=True)
     else:
         print("[PRE-BUILD] ⚠️  Предупреждение: не удалось обновить версию\n", flush=True)
+    
+    # КРИТИЧЕСКО ВАЖНО: возвращаем env обратно
+    return env
 
 # Для работы с PlatformIO
 if __name__ == "__main__":
     # Если скрипт запущен напрямую (не через PlatformIO)
-    main()
+    # Создаем минимальный объект env с PROJECT_DIR
+    class FakeEnv:
+        def __init__(self):
+            self.data = {'PROJECT_DIR': os.getcwd()}
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+    
+    main(FakeEnv())
