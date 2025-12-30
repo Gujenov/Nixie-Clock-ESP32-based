@@ -27,26 +27,17 @@ void handleSerialCommands() {
   }
   else if(command.equals("info")) {
     printSystemInfo();
-  }
-  else if(command.equals("espinfo")) {
     printESP32Info();
   }
-  else if (command.startsWith("setup")) {
+  else if (command.equals("setings")) {
     printEnabled=false;
     printSettings();
   }
-  else if(command.equals("time") || command.equals("LT")) {
+  else if(command.equals("time") || command.equals("T")) {
     time_t currentTime = getCurrentUTCTime();  // Используем существующую функцию
     struct tm* timeinfo = localtime(&currentTime);
     char buffer[32];
     strftime(buffer, sizeof(buffer), "Local: %Y-%m-%d %H:%M:%S %Z", timeinfo);
-    Serial.println(buffer);
-  }
-  else if(command.equals("utc") || command.equals("UTC")) {
-    time_t utcTime = getCurrentUTCTime();  // getCurrentTime уже возвращает UTC
-    struct tm* timeinfo = gmtime(&utcTime);
-    char buffer[32];
-    strftime(buffer, sizeof(buffer), "UTC: %Y-%m-%d %H:%M:%S", timeinfo);
     Serial.println(buffer);
   }
   else if(command.equals("WF")){ 
@@ -227,14 +218,30 @@ void handleSerialCommands() {
     timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
     Serial.println("Конфигурация сброшена к значениям по умолчанию");
   }
-  else if (command.startsWith("set time ")|| command.equals("ST ")) {
-    String timeStr = command.substring(9);
+  else if (command.startsWith("set time ") || command.startsWith("ST ")) {
+    String timeStr;
+    
+    if (command.startsWith("set time ")) {
+        timeStr = command.substring(9);  // "set time " = 9 символов
+    } else {
+        timeStr = command.substring(3);  // "ST " = 3 символа
+    }
+    
+    //timeStr.trim(); // Убираем лишние пробелы
     setManualTime(timeStr);
-  }
-  else if (command.startsWith("set date ")|| command.equals("SD ")) {
-    String dateStr = command.substring(9);
+}
+else if (command.startsWith("set date ") || command.startsWith("SD ")) {
+    String dateStr;
+    
+    if (command.startsWith("set date ")) {
+        dateStr = command.substring(9);  // "set date " = 9 символов
+    } else {
+        dateStr = command.substring(3);  // "SD " = 3 символа  
+    }
+    
+    //dateStr.trim();
     setManualDate(dateStr);
-  }
+}
   else if (command.startsWith("set al 1 ")) {
     String timeStr = command.substring(8);
     setAlarm(1, timeStr);
@@ -295,19 +302,17 @@ void handleSerialCommands() {
 void printHelp() {
   Serial.println("\n=== Доступные команды ===");
 
-  Serial.println("\ntime, LT       - Текущее локальное время");
-  Serial.println("utc, UTC       - Текущее UTC время");
-  Serial.println("timeinfo, ti   - Полная информация о времени");
+  Serial.println("\ntime, T        - Текущее время");
+  Serial.println("WF             - Настройки WI-FI и NTP");
   Serial.println("timesource, ts - Источник текущего времени");
   Serial.println("sync, ntp      - Принудительная синхронизация с NTP");
   Serial.println("syncstatus, ss - Статус последней синхронизации");
   Serial.println("reset config   - сбросить настройки к значениям по умолчанию");
 
-  Serial.println("\nhelp            - показать это сообщение");
-  Serial.println("info          - Информация о системе");
-  Serial.println("espinfo       - показать информацию об ESP32");
+  Serial.println("\nhelp, ?         - показать это сообщение");
+  Serial.println("info           - Информация о системе");
 
-  Serial.println("\nsetup          - Вход в режим настройки");
+  Serial.println("\nsetings        - Вход в режим настройки");
   Serial.println("out            - Выход из режима настройки");
 
   Serial.println("==========================\n");

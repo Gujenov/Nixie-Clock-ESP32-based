@@ -113,9 +113,9 @@ void checkTimeSource() {
     // Выводим сообщение о подключении (если нужно)
     if (showConnectionMessage && ds3231_available) {
         if (diff > 5) {
-            Serial.printf("\n[SYNC] DS3231 подключен, синхронизация (расхождение: %ld сек)\n", diff);
+            Serial.printf("[SYNC] DS3231 подключен, синхронизация (расхождение: %ld сек)\n", diff);
         } else {
-            Serial.println("\n[SYNC] DS3231 подключен, время совпадает");
+            Serial.println("[SYNC] DS3231 подключен, время совпадает");
         }
     }
     
@@ -340,7 +340,7 @@ void printTimeFromTimeT(time_t utcTime) {
 // Установка времени по умолчанию: 9:00 6.07.1990 Пятница
 void setDefaultTimeToAllSources() {
     struct tm default_tm = {0};
-    default_tm.tm_year = 100;     // 2000
+    default_tm.tm_year = 125;     // 2025
     default_tm.tm_mon = 7 - 1;
     default_tm.tm_mday = 6;
     default_tm.tm_hour = 9;
@@ -348,12 +348,8 @@ void setDefaultTimeToAllSources() {
     default_tm.tm_sec = 0;
     default_tm.tm_isdst = 0;
     
-    // Конвертируем в time_t (UTC)
-    setenv("TZ", "UTC", 1);
-    tzset();
     time_t default_time = mktime(&default_tm);
-    unsetenv("TZ");
-    tzset();
+
     
     // Устанавливаем во все источники
     setTimeToAllSources(default_time);
@@ -404,7 +400,7 @@ bool setManualTime(const String &timeStr) {
     setTimeToAllSources(newTime_utc);
     
     Serial.printf("✅ Время установлено: %02d:%02d:%02d UTC\n", hours, minutes, seconds);
-    printTime();
+    //printTime();
     return true;
 }
 
@@ -415,7 +411,7 @@ bool isValidDate(int day, int month, int year) {
     };
     
     // Проверки
-    if (year < 2000 || year > 2099) return false;
+    if (year < 2025 || year > 2099) return false;
     if (month < 1 || month > 12) return false;
     
     if (month == 4 || month == 6 || month == 9 || month == 11) {
@@ -444,7 +440,7 @@ bool setManualDate(const String &dateStr) {
         
         // Полезное сообщение для 29 февраля
         if (month == 2 && day == 29) {
-            Serial.printf("Год %d не високосный\n", year);
+            Serial.printf("Год %d не высокосный\n", year);
         }
         return false;
     }
@@ -455,33 +451,22 @@ bool setManualDate(const String &dateStr) {
     struct tm utc_time;
     gmtime_r(&now_utc, &utc_time);
     
-    // 2. Если системное время некорректно (< 2025), используем дефолт
-    if (utc_time.tm_year + 1900 < 2025) {
-        // Устанавливаем дату по умолчанию: 06.07.2025
-        utc_time.tm_year = 2025 - 1900;
-        utc_time.tm_mon = 7 - 1;     // Июль
-        utc_time.tm_mday = 6;
-        Serial.println("⚠️  Системное время некорректно, использую дату по умолчанию: 06.07.2025");
-    }
     
-    // 3. Меняем только дату (сохраняем текущее время)
+    // 2. Меняем дату (сохраняем текущее время)
     utc_time.tm_mday = day;
     utc_time.tm_mon = month - 1;  // Месяцы 0-11
-    utc_time.tm_year = year - 1900;
+    utc_time.tm_year = year - 1900;        
+        
     
-    // 4. Записываем время (UTC)
+    // 3. Записываем время (UTC)
     time_t newTime_utc = mktime(&utc_time);
-    
-    if (newTime_utc == -1) {
-        Serial.println("Ошибка: некорректная дата (возможно, 31 февраля?)");
-        return false;
-    }
-    
-    // 5. Устанавливаем во все источники
+
+
+    // 4. Устанавливаем во все источники
     setTimeToAllSources(newTime_utc);
     
     Serial.printf("✅ Дата установлена: %02d.%02d.%04d UTC\n", day, month, year);
-    printTime();
+    //printTime();
     return true;
 }
 

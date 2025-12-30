@@ -42,6 +42,7 @@ void setup() {
     }
   */
     Serial.println("\n=== Система готова ===");
+    Serial.println("\nhelp,? - Перечень доступных команд");
     
 }
 

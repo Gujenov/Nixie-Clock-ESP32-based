@@ -59,7 +59,7 @@ void setupInterrupts() {
         attachInterrupt(digitalPinToInterrupt(SQW_PIN), onTimeInterrupt, FALLING);
         
         if (!interruptsInitialized || lastConfiguredSource != EXTERNAL_DS3231) {
-            Serial.println("Используется прерывание от DS3231");
+            Serial.println("\nИспользуется прерывание от DS3231");
         }
         
     } else {
