@@ -55,13 +55,14 @@ void loop() {
         portENTER_CRITICAL(&timerMux);
         timeUpdatedFromSQW = false;
         portEXIT_CRITICAL(&timerMux);
-        Serial.println("Прерывание от SQW");
+        //Serial.println("Прерывание от SQW"); // Отладка
         processSecondTick();  // Обрабатываем секунду
     }
     // 2. Или если прошла секунда по millis() (когда DS3231 не доступен)
     else if (!ds3231_available && (currentMillis - lastSecondCheck >= 1000)) {
         lastSecondCheck = currentMillis;
         processSecondTick();  // Обрабатываем секунду
+        //Serial.println("Прерывание от ESP32 RTC"); // Отладка
     }
     
     delay(10);
