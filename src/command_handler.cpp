@@ -271,29 +271,6 @@ else if (command.startsWith("set date ") || command.startsWith("SD ")) {
   else if (command.startsWith("out")) { 
     printEnabled=true;
   }
-  else if (command.equals("debug")) {
-    // Отладочная информация
-    Serial.println("\n=== Debug Information ===");
-    Serial.printf("Current time source: %s\n", 
-        currentTimeSource == EXTERNAL_DS3231 ? "EXTERNAL_DS3231" : "INTERNAL_RTC");
-    Serial.printf("DS3231 available: %s\n", ds3231_available ? "true" : "false");
-    Serial.printf("WiFi SSID: %s\n", config.wifi_ssid);
-    Serial.printf("NTP server: %s\n", config.ntp_server);
-  //  Serial.printf("Timezone offset: %d\n", config.time_config.timezone_offset);
-  //  Serial.printf("DST enabled: %s\n", config.time_config.dst_enabled ? "true" : "false");
-    
-    time_t now = getCurrentUTCTime();
-    struct tm* utc = gmtime(&now);
-    char buffer[32];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S UTC", utc);
-    Serial.printf("Current UTC: %s\n", buffer);
-    
-    struct tm* local = localtime(&now);
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", local);
-    Serial.printf("Current local: %s\n", buffer);
-    
-    Serial.println("========================");
-  }
   else {
     Serial.println("Неизвестная команда. Введите 'help' для списка команд");
   }
@@ -307,6 +284,7 @@ void printHelp() {
   Serial.println("timesource, ts - Источник текущего времени");
   Serial.println("sync, ntp      - Принудительная синхронизация с NTP");
   Serial.println("syncstatus, ss - Статус последней синхронизации");
+  Serial.println("show config,sc - Показать текущие настройки");
   Serial.println("reset config   - сбросить настройки к значениям по умолчанию");
 
   Serial.println("\nhelp, ?         - показать это сообщение");

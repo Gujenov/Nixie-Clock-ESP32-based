@@ -18,9 +18,8 @@ extern ESP32Encoder encoder;
 extern RTC_DS3231 *rtc;
 extern hw_timer_t *timer;
 extern portMUX_TYPE timerMux;
-extern volatile bool timeUpdated;
 extern bool ds3231_available;
-
+extern volatile bool timeUpdatedFromSQW;
 
 void setupInterrupts();
 void blinkError(int count);
