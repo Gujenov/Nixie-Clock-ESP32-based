@@ -7,6 +7,7 @@
 #include "time_utils.h"
 #include "dcf77_handler.h"
 
+static bool sqwFailed = false;  // false = SQW работает, true = перешли на millis
 
 void processSecondTick();
 
@@ -42,27 +43,46 @@ void setup() {
 
 void loop() {
     static unsigned long lastSecondCheck = 0;
+    static unsigned long lastSQWCheck = 0;
     unsigned long currentMillis = millis();
     
-    // Обработка команд и ввода (как было)
+    // Обработка команд и ввода
     if (Serial.available()) handleSerialCommands();
-    // ... processAllInputs ...
+
     
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
-    
-    // 1. Если пришло прерывание от SQW И DS3231 доступен
-    if (timeUpdatedFromSQW && ds3231_available) {
-        portENTER_CRITICAL(&timerMux);
-        timeUpdatedFromSQW = false;
-        portEXIT_CRITICAL(&timerMux);
-        //Serial.println("Прерывание от SQW"); // Отладка
-        processSecondTick();  // Обрабатываем секунду
+// Если DS3231 доступен
+    if (ds3231_available) {
+        // Прерывание от SQW пришло
+        if (timeUpdatedFromSQW) {
+            portENTER_CRITICAL(&timerMux);
+            timeUpdatedFromSQW = false;
+            portEXIT_CRITICAL(&timerMux);
+            
+            lastSQWCheck = currentMillis;  // Сброс таймера
+            sqwFailed = false;             // SQW снова работает
+            
+            processSecondTick();
+        }
+        // SQW не пришло 3 секунды
+        else if (!sqwFailed && (currentMillis - lastSQWCheck >= 3000)) {
+            sqwFailed = true;
+            Serial.println("[WARN] SQW не поступает 3 сек, перехожу на millis!");
+            lastSecondCheck = currentMillis;
+            processSecondTick();
+        }
+        // Работаем по millis после отказа SQW
+        else if (sqwFailed && (currentMillis - lastSecondCheck >= 1000)) {
+            lastSecondCheck = currentMillis;
+            processSecondTick();
+        }
     }
-    // 2. Или если прошла секунда по millis() (когда DS3231 не доступен)
-    else if (!ds3231_available && (currentMillis - lastSecondCheck >= 1000)) {
-        lastSecondCheck = currentMillis;
-        processSecondTick();  // Обрабатываем секунду
-        //Serial.println("Прерывание от ESP32 RTC"); // Отладка
+    // DS3231 не доступен
+    else {
+        if (currentMillis - lastSecondCheck >= 1000) {
+            lastSecondCheck = currentMillis;
+            processSecondTick();
+        }
     }
     
     delay(10);
@@ -83,6 +103,9 @@ void processSecondTick() {
     
     // Только полезные действия
     if (currentSecond % 20 == 0) {
+            if((ds3231_available) && (sqwFailed)){
+                Serial.println("[WARN] SQW не доступен");    
+            }
         printTime();
     }
     

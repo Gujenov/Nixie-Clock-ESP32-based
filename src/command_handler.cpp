@@ -16,6 +16,7 @@ void printSystemInfo();
 void printESP32Info();
 void printSettings();
 
+
 void handleSerialCommands() {
   if(!Serial.available()) return;
   
@@ -34,11 +35,7 @@ void handleSerialCommands() {
     printSettings();
   }
   else if(command.equals("time") || command.equals("T")) {
-    time_t currentTime = getCurrentUTCTime();  // Используем существующую функцию
-    struct tm* timeinfo = localtime(&currentTime);
-    char buffer[32];
-    strftime(buffer, sizeof(buffer), "Local: %Y-%m-%d %H:%M:%S %Z", timeinfo);
-    Serial.println(buffer);
+    printTime();
   }
   else if(command.equals("WF")){ 
     Serial.printf("WiFi SSID: %s\n", config.wifi_ssid);
