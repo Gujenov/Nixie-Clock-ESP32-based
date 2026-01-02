@@ -1,12 +1,12 @@
 bool syncTime() {
     // Проверяем, инициализирован ли timeClient
     if (!timeClient) {
-        Serial.println("\n[NTP] Ошибка: timeClient не инициализирован");
+        Serial.print("\n\n[NTP] Ошибка: timeClient не инициализирован");
         return false;
     }
     
     digitalWrite(LED_PIN, HIGH);
-    Serial.println("\n[NTP] Попытка синхронизации...");
+    Serial.print("\n\n[NTP] Попытка синхронизации...");
     
     bool success = false;
     
@@ -22,18 +22,18 @@ bool syncTime() {
         Serial.print(".");
         attempts++;
     }
-    Serial.println();
+    Serial.print("\n");
     
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[NTP] Ошибка: не удалось подключиться к WiFi");
+        Serial.print("\n[NTP] Ошибка: не удалось подключиться к WiFi");
         digitalWrite(LED_PIN, LOW);
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
         return false;
     }
     
-    Serial.printf("[WiFi] Подключено к %s\n", config.wifi_ssid);
-    Serial.printf("[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("\n[WiFi] Подключено к %s", config.wifi_ssid);
+    Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
     
     // 3. Пробуем синхронизироваться с NTP
     try {
@@ -56,13 +56,13 @@ bool syncTime() {
                 // Устанавливаем UTC время в систему
                 struct timeval tv = { utcTime, 0 };
                 settimeofday(&tv, NULL);
-                Serial.println("[NTP]->[RTC] Время записано во внутренний RTC");
+                Serial.print("\n[NTP]->[RTC] Время записано во внутренний RTC");
                 
                 // Записываем в DS3231 ТОЖЕ UTC
                 if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
                     DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
                     rtc->adjust(rtcTime);
-                    Serial.println("[NTP]->[DS3231] Время записано в аппаратные часы");
+                    Serial.print("\n[NTP]->[DS3231] Время записано в аппаратные часы");
                 }
                 
                 // УДАЛЕНА строка с локальным временем и DST
@@ -79,28 +79,28 @@ bool syncTime() {
                 success = true;
                 digitalWrite(LED_PIN, LOW);
             } else {
-                Serial.println("[NTP] Ошибка: получено некорректное время");
+                Serial.print("\n[NTP] Ошибка: получено некорректное время");
             }
         } else {
-            Serial.println("[NTP] Ошибка: forceUpdate() не удался");
+            Serial.print("\n[NTP] Ошибка: forceUpdate() не удался");
         }
         
         timeClient->end();
     } catch (...) {
-        Serial.println("[NTP] Исключение при синхронизации!");
+        Serial.print("\n[NTP] Исключение при синхронизации!");
     }
     
     // 4. Отключаем WiFi
-    Serial.println("[WiFi] Отключение...");
+    Serial.print("\n[WiFi] Отключение...");
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_OFF);
     
     if (!success) {
         blinkError(11);
-        Serial.println("[NTP] Не удалось синхронизировать время!");
+        Serial.print("\n[NTP] Не удалось синхронизировать время!");
     } else {
-        Serial.println("[NTP] Синхронизация успешна!");
+        Serial.print("\n[NTP] Синхронизация успешна!");
     }
     
     return success;

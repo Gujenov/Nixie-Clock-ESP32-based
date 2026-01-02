@@ -8,6 +8,7 @@
 #include "dcf77_handler.h"
 
 static bool sqwFailed = false;  // false = SQW работает, true = перешли на millis
+extern bool printEnabled;        // из time_utils.cpp
 
 void processSecondTick();
 
@@ -25,7 +26,9 @@ void setup() {
     // 4. Проверка источников времени
     checkTimeSource(); 
     
-
+    // 5. Чтение температуры с DS3231 (если доступен)
+    printDS3231Temperature();
+    
     // 6. Попытка NTP синхронизации (если разрешено)
     if(config.time_config.auto_sync_enabled && strlen(config.wifi_ssid) > 0) {
         syncTime();  // Существующая функция из time_utils.cpp
@@ -37,8 +40,9 @@ void setup() {
     updateDCF77(); // Начинаем приём DCF77
     }
   */
-    Serial.println("\n=== Система готова ===");
-    Serial.println("\nhelp,? - Перечень доступных команд");
+    Serial.print("\n\n=== Система готова ===");
+    Serial.println("\n\nhelp,? - Перечень доступных команд");
+    printEnabled = true; // Включаем вывод времени по секундам
 }
 
 void loop() {
@@ -48,26 +52,25 @@ void loop() {
     
     // Обработка команд и ввода
     if (Serial.available()) handleSerialCommands();
-
-    
+ 
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
-// Если DS3231 доступен
+    
+    // Если DS3231 доступен
     if (ds3231_available) {
         // Прерывание от SQW пришло
         if (timeUpdatedFromSQW) {
             portENTER_CRITICAL(&timerMux);
             timeUpdatedFromSQW = false;
             portEXIT_CRITICAL(&timerMux);
-            
             lastSQWCheck = currentMillis;  // Сброс таймера
             sqwFailed = false;             // SQW снова работает
-            
+            //Serial.print("\nПрерывание от SQW получено"); // Отладка
             processSecondTick();
         }
         // SQW не пришло 3 секунды
         else if (!sqwFailed && (currentMillis - lastSQWCheck >= 3000)) {
             sqwFailed = true;
-            Serial.println("[WARN] SQW не поступает 3 сек, перехожу на millis!");
+            Serial.print("\n[WARN] SQW не поступает 3 сек, переход на millis!");
             lastSecondCheck = currentMillis;
             processSecondTick();
         }
@@ -80,11 +83,11 @@ void loop() {
     // DS3231 не доступен
     else {
         if (currentMillis - lastSecondCheck >= 1000) {
+            lastSQWCheck = currentMillis;  // Сброс таймера
             lastSecondCheck = currentMillis;
             processSecondTick();
         }
     }
-    
     delay(10);
 }
 
@@ -101,21 +104,36 @@ void processSecondTick() {
     struct tm* tm_info = gmtime(&currentTime);
     uint8_t currentSecond = tm_info->tm_sec;
     
-    // Только полезные действия
-    if (currentSecond % 20 == 0) {
+    if(printEnabled) {
+         //Вывод символа каждую секунду для индикации работы
+        if ((ds3231_available) && (!sqwFailed)) {
+            Serial.print(".");
+        } else {
+            Serial.print("*");
+        }
+        // Только полезные действия
+        if (currentSecond % 20 == 0) {
             if((ds3231_available) && (sqwFailed)){
-                Serial.println("[WARN] SQW не доступен");    
+                Serial.print("\n[WARN] SQW не доступен");    
             }
         printTime();
+        }
     }
+
+    
     
     checkAlarms();
     
-    // Синхронизация раз в 12 часов
+    // Синхронизация в полночь и в полдень
     static uint8_t lastSyncHour = 255;
-    if (tm_info->tm_hour != lastSyncHour && 
-        (tm_info->tm_hour == 0 || tm_info->tm_hour == 12)) {
+
+    if ((tm_info->tm_hour == 0 || tm_info->tm_hour == 12) && 
+    tm_info->tm_min == 0) {
+    
+    // Проверяем, что ещё не синхронизировали в этот час
+    if (tm_info->tm_hour != lastSyncHour ) {
         syncTime();
         lastSyncHour = tm_info->tm_hour;
+    }
     }
 }

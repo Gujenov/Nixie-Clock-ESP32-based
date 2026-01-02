@@ -15,11 +15,10 @@ void initConfiguration() {
   if(preferences.getBytesLength("data") != sizeof(config)) {
     // Устанавливаем новые значения по умолчанию
     setDefaultConfig();
-    Serial.println("Установлены настройки по умолчанию");
   } else {
     // Загружаем сохраненную конфигурацию
     preferences.getBytes("data", &config, sizeof(config));
-    Serial.println("\nКонфигурация загружена из памяти");
+    Serial.print("\n\n[SYSTEM] Конфигурация загружена из памяти");
   }
   
   preferences.end();
@@ -30,7 +29,7 @@ void initConfiguration() {
 void initNTPClient() {
     if (!timeClient) {
         timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
-        Serial.printf("[NTP] Клиент инициализирован с сервером: %s\n", config.ntp_server);
+        Serial.printf("\n[NTP] Клиент инициализирован с сервером: %s", config.ntp_server);
     }
 }
 
@@ -42,7 +41,7 @@ void updateNTPServer(const char* server) {
     strlcpy(config.ntp_server, server, sizeof(config.ntp_server));
     initNTPClient();
     saveConfig();
-    Serial.printf("[Config] NTP сервер обновлён: %s\n", server);
+    Serial.printf("\n[Config] NTP сервер обновлён: %s", server);
 }
 
 void setDefaultConfig() {
@@ -72,6 +71,7 @@ void setDefaultConfig() {
     config.alarm2 = {0, 0, false};
     
     saveConfig();
+    Serial.print("\n\n[SYSTEM] Установлены настройки по умолчанию");
 }
 
 void saveConfig() {

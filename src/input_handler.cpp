@@ -26,7 +26,7 @@ void initInputHandler() {
     if (!encoderInitialized) {
         lastEncoderPos = encoder.getCount();
         encoderInitialized = true;
-        Serial.println("[INPUT] Input handler initialized");
+        Serial.print("\n[INPUT] Input handler initialized");
     }
 }
 
@@ -115,13 +115,13 @@ void processAllInputs() {
     if (buttonEvent != BUTTON_NONE && buttonCallback == nullptr) {
         switch (buttonEvent) {
             case BUTTON_PRESSED:
-                Serial.println("[BTN] Short press");
+                Serial.print("\n[BTN] Short press");
                 break;
             case BUTTON_LONG:
-                Serial.println("[BTN] Long press (1s)");
+                Serial.print("\n[BTN] Long press (1s)");
                 break;
             case BUTTON_VERY_LONG:
-                Serial.println("[BTN] Very long press (3s)");
+                Serial.print("\n[BTN] Very long press (3s)");
                 break;
         }
     }

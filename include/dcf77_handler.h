@@ -4,7 +4,7 @@
 #include "config.h"
 
 // Конфигурация пинов DCF77
-#define DCF_DATA_PIN 12     // Пин данных (GPIO12)
+#define DCF_DATA_PIN 7     // Пин данных (GPIO12)
 #define DCF_ENABLE_PIN 14   // Пин включения модуля (GPIO14)
 #define DCF_INTERRUPT digitalPinToInterrupt(DCF_DATA_PIN)
 

@@ -6,12 +6,12 @@
 bool setAlarm(uint8_t alarmNum, const String &timeStr) {
     int hours, minutes;
     if (sscanf(timeStr.c_str(), "%d:%d", &hours, &minutes) != 2) {
-        Serial.println("Ошибка формата. Используйте HH:MM");
+        Serial.print("\nОшибка формата. Используйте HH:MM");
         return false;
     }
 
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-        Serial.println("Ошибка: некорректное время (00:00 - 23:59)");
+        Serial.print("\nОшибка: некорректное время (00:00 - 23:59)");
         return false;
     }
 
@@ -24,7 +24,7 @@ bool setAlarm(uint8_t alarmNum, const String &timeStr) {
         config.alarm2.minute = minutes;
         config.alarm2.enabled = true;
     } else {
-        Serial.println("Ошибка: неверный номер будильника (1 или 2)");
+        Serial.print("\nОшибка: неверный номер будильника (1 или 2)");
         return false;
     }
 
@@ -135,7 +135,7 @@ bool disableAlarm(uint8_t alarmNum) {
     } else if (alarmNum == 2) {
         config.alarm2.enabled = false;
     } else {
-        Serial.println("Ошибка: неверный номер будильника (1 или 2)");
+        Serial.print("\nОшибка: неверный номер будильника (1 или 2)");
         return false;
     }
     
@@ -151,7 +151,7 @@ bool enableAlarm(uint8_t alarmNum) {
     } else if (alarmNum == 2) {
         config.alarm2.enabled = true;
     } else {
-        Serial.println("Ошибка: неверный номер будильника (1 или 2)");
+        Serial.print("\nОшибка: неверный номер будильника (1 или 2)");
         return false;
     }
     
@@ -162,7 +162,7 @@ bool enableAlarm(uint8_t alarmNum) {
 
 // Функция для проверки статуса будильника
 void printAlarmStatus() {
-    Serial.println("\n=== Статус будильников ===");
+    Serial.print("\n\n=== Статус будильников ===");
     
     auto printAlarmInfo = [](const AlarmSettings &alarm, uint8_t num) {
         Serial.printf("Будильник %d: ", num);
@@ -171,7 +171,7 @@ void printAlarmStatus() {
         } else {
             Serial.print("ВЫКЛ");
         }
-        Serial.println();
+        Serial.print("\n");
     };
     
     printAlarmInfo(config.alarm1, 1);
@@ -182,8 +182,8 @@ void printAlarmStatus() {
     if (minutesToAlarm < 255) {
         Serial.printf("До ближайшего будильника: %d минут\n", minutesToAlarm);
     } else {
-        Serial.println("Нет активных будильников");
+        Serial.print("\nНет активных будильников");
     }
     
-    Serial.println("=========================\n");
+    Serial.print("\n=========================\n");
 }

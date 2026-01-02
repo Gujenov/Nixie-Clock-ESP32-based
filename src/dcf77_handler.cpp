@@ -25,7 +25,7 @@ void initDCF77() {
     dcfEnabled = true;
     lastSyncMillis = 0;
     
-    Serial.println("[DCF77] Запущен. Ожидание сигнала...");
+    Serial.print("\n[DCF77] Запущен. Ожидание сигнала...");
 }
 
 void updateDCF77() {
