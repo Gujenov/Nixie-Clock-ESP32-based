@@ -33,12 +33,6 @@ void IRAM_ATTR onSQWInterrupt() {
 }
 
 void setupInterrupts() {
-    static bool interruptsConfigured = false;
-    
-    // Если уже настроены для текущего источника - ничего не делаем
-    if (interruptsConfigured) {
-        return;
-    }
     
     // Всегда отключаем старые прерывания перед настройкой новых
     if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
@@ -50,10 +44,9 @@ void setupInterrupts() {
         // Работаем от внутреннего RTC - НЕ используем прерывания
         // Просто отключаем SQW если был подключен
         detachInterrupt(digitalPinToInterrupt(SQW_PIN));
-        Serial.println("Используется внутренний счёт в мсекундах ESP32  (без прерываний)");
+        Serial.println("Отчет прерываний по внутреннему счёту ESP32 [мсек]");
     }
     
-    interruptsConfigured = true;
 }
 
 void blinkError(int count) {
@@ -66,4 +59,29 @@ void blinkError(int count) {
   }
 }
 
+float getDS3231Temperature() {
+    if (!rtc || !ds3231_available) {
+        return -999.0; // Код ошибки
+    }
+    
+    try {
+        return rtc->getTemperature();
+    } catch (...) {
+        return -999.0;
+    }
+}
 
+// Форматированный вывод
+void printDS3231Temperature() {
+    if (!ds3231_available) {
+        Serial.println("[ERR] Температура DS3231 недоступна");
+        return;
+    }
+    
+    float temp = getDS3231Temperature();
+    if (temp > -100.0) { // Проверяем не код ошибки ли
+        Serial.printf("Температура DS3231: %.1f°C\n", temp);
+    } else {
+        Serial.println("[ERR] Ошибка чтения температуры DS3231");
+    }
+}

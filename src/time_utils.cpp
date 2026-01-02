@@ -49,7 +49,7 @@ void checkTimeSource() {
         if (rtc && rtc->begin()) {
             ds3231_available = true;
             currentTimeSource = EXTERNAL_DS3231;
-            
+
             Serial.println("\n✓ DS3231 инициализирован");
             
             // Получаем время от DS3231
@@ -310,14 +310,13 @@ bool printTime() {
         
         char buf[64];
         strftime(buf, sizeof(buf), "%a %d.%m.%Y %H:%M:%S UTC", &utc_tm);
-        Serial.print("Время: ");
         Serial.print(buf);
         
         // Показываем текущий источник
         if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
-            Serial.println(" (DS3231)");
+            Serial.println(" [DS3231]");
         } else {
-            Serial.println(" (ESP32 RTC)");
+            Serial.println(" [ESP32 RTC]");
         }
         
         return true;
@@ -337,7 +336,7 @@ void printTimeFromTimeT(time_t utcTime) {
     }
 }
 
-// Установка времени по умолчанию: 9:00 6.07.1990 Пятница
+// Установка времени по умолчанию: 9:00 6.07.2025
 void setDefaultTimeToAllSources() {
     struct tm default_tm = {0};
     default_tm.tm_year = 125;     // 2025

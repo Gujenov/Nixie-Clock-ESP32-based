@@ -25,7 +25,9 @@ void setup() {
     // 4. Проверка источников времени
     checkTimeSource(); 
     
-
+    // 5. Чтение температуры с DS3231 (если доступен)
+    printDS3231Temperature();
+    
     // 6. Попытка NTP синхронизации (если разрешено)
     if(config.time_config.auto_sync_enabled && strlen(config.wifi_ssid) > 0) {
         syncTime();  // Существующая функция из time_utils.cpp
@@ -48,26 +50,25 @@ void loop() {
     
     // Обработка команд и ввода
     if (Serial.available()) handleSerialCommands();
-
-    
+ 
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
-// Если DS3231 доступен
+    
+    // Если DS3231 доступен
     if (ds3231_available) {
         // Прерывание от SQW пришло
         if (timeUpdatedFromSQW) {
             portENTER_CRITICAL(&timerMux);
             timeUpdatedFromSQW = false;
             portEXIT_CRITICAL(&timerMux);
-            
             lastSQWCheck = currentMillis;  // Сброс таймера
             sqwFailed = false;             // SQW снова работает
-            
+            //Serial.println("Прерывание от SQW получено"); // Отладка
             processSecondTick();
         }
         // SQW не пришло 3 секунды
         else if (!sqwFailed && (currentMillis - lastSQWCheck >= 3000)) {
             sqwFailed = true;
-            Serial.println("[WARN] SQW не поступает 3 сек, перехожу на millis!");
+            Serial.println("[WARN] SQW не поступает 3 сек, переход на millis!");
             lastSecondCheck = currentMillis;
             processSecondTick();
         }
@@ -80,11 +81,11 @@ void loop() {
     // DS3231 не доступен
     else {
         if (currentMillis - lastSecondCheck >= 1000) {
+            lastSQWCheck = currentMillis;  // Сброс таймера
             lastSecondCheck = currentMillis;
             processSecondTick();
         }
     }
-    
     delay(10);
 }
 

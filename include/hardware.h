@@ -29,3 +29,5 @@ void initTimeSource();
 void updateDisplay(time_t now);
 time_t getRTCTime();
 void updateDayOfWeekInRTC();
+float getDS3231Temperature();
+void printDS3231Temperature();

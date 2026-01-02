@@ -15,11 +15,10 @@ void initConfiguration() {
   if(preferences.getBytesLength("data") != sizeof(config)) {
     // Устанавливаем новые значения по умолчанию
     setDefaultConfig();
-    Serial.println("Установлены настройки по умолчанию");
   } else {
     // Загружаем сохраненную конфигурацию
     preferences.getBytes("data", &config, sizeof(config));
-    Serial.println("\nКонфигурация загружена из памяти");
+    Serial.println("\n[SYSTEM] Конфигурация загружена из памяти");
   }
   
   preferences.end();
@@ -72,6 +71,7 @@ void setDefaultConfig() {
     config.alarm2 = {0, 0, false};
     
     saveConfig();
+    Serial.println("\n[SYSTEM] Установлены настройки по умолчанию");
 }
 
 void saveConfig() {

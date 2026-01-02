@@ -1,5 +1,5 @@
 MCU.HW_VARIANT.RELEASE_TYPE.BUILD
-set time 13:08:11
+set time 11:59:58
 ST 13:08:11
 
 set date 01.02.2026

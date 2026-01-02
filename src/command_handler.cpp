@@ -213,7 +213,6 @@ void handleSerialCommands() {
     setDefaultConfig();
     delete timeClient;
     timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
-    Serial.println("Конфигурация сброшена к значениям по умолчанию");
   }
   else if (command.startsWith("set time ") || command.startsWith("ST ")) {
     String timeStr;

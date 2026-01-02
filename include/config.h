@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.251230"
+#define FIRMWARE_VERSION "1.A0.3.260101"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
