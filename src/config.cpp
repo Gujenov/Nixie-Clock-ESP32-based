@@ -52,12 +52,24 @@ void setDefaultConfig() {
     strlcpy(config.wifi_pass, "Alohomora!", sizeof(config.wifi_pass));
     strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
     
-    // TimeConfig defaults
+     // Timezone settings
     config.time_config.manual_time_set = false;
-    config.time_config.auto_timezone = true;      // Разрешить автоопределение
-    config.time_config.auto_sync_enabled = true;  // Разрешить автосинхронизацию
+    config.time_config.auto_timezone = true;      // Включаем автоопределение
+    config.time_config.auto_sync_enabled = true;
+    config.time_config.auto_dst = true;           // Авто DST включено
     config.time_config.dcf77_enabled = true;      // DCF77 включён
-        
+    
+    // Имя пояса по умолчанию
+    strcpy(config.time_config.timezone_name, DEFAULT_TIMEZONE_NAME);
+    config.time_config.manual_offset = DEFAULT_TIMEZONE_OFFSET;
+    config.time_config.dst_enabled = false;       // Управляется библиотекой!
+    
+    // Состояние
+    config.time_config.location_detected = false;
+    config.time_config.detected_tz[0] = '\0';
+    config.time_config.dst_active = false;
+       
+    // Синхронизация
     config.time_config.sync_interval_hours = 12;  // Синхронизировать каждые 12 часов
     config.time_config.last_ntp_sync = 0;         // Никогда не синхронизировались
     config.time_config.last_dcf77_sync = 0;

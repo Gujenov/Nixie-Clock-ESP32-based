@@ -27,7 +27,7 @@
 
 // Часовые пояса по умолчанию
 #define DEFAULT_TIMEZONE_OFFSET 3    // UTC+3 (Москва)
-#define DEFAULT_DST_ENABLED true     // Использовать летнее время
+#define DEFAULT_TIMEZONE_NAME "Europe/Moscow"  //
 
 struct AlarmSettings {
     uint8_t hour;
@@ -35,17 +35,25 @@ struct AlarmSettings {
     bool enabled;
 };
 
+
 struct TimeConfig {
     // Флаги управления
     bool manual_time_set;        // Время установлено вручную
-    bool auto_timezone;          // Автоопределение пояса
+    bool auto_timezone;          // Автоопределение пояса (true = разрешить менять)
     bool auto_sync_enabled;      // Автосинхронизация разрешена
-    bool dcf77_enabled;          // Использовать DCF77
+    bool auto_dst;               // Автоопределение DST (true = разрешить менять)
+    bool dcf77_enabled;          // Включить/выключить DCF77 приемник
     
-    // Часовой пояс
-    int8_t timezone_offset;      // Смещение от UTC в часах
-    bool dst_enabled;            // Использовать летнее время
-        
+    // Настройки
+    char timezone_name[32];      // "Europe/Moscow", "Asia/Vladivostok"
+    int8_t manual_offset;        // Ручное смещение (часы)
+    bool dst_enabled;            // Включить DST (если auto_dst = false)
+    
+    // Флаги состояния
+    bool location_detected;      // Пояс определён автоматически
+    char detected_tz[32];        // Определённый пояс (для отладки)
+    bool dst_active;             // Текущий статус DST (только для чтения)
+
     // Синхронизация
     uint8_t sync_interval_hours; // Интервал синхронизации (часы)
     uint32_t last_ntp_sync;      // Время последней NTP синхронизации (UNIX time)
@@ -82,3 +90,11 @@ void setDefaultConfig();
 void saveConfig();
 void initNTPClient();
 void updateNTPServer(const char* server);
+
+// Функции для работы с часовыми поясами
+bool initTimezone();             // Инициализация Timezone
+time_t utcToLocal(time_t utc);   // Конвертация UTC → Local
+time_t localToUtc(time_t local); // Конвертация Local → UTC
+bool setTimezone(const char* tz_name); // Установка пояса по имени
+bool setTimezoneOffset(int8_t offset); // Установка по смещению
+void updateDSTStatus();          // Обновление статуса DST
