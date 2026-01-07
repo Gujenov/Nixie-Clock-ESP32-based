@@ -162,7 +162,7 @@ bool enableAlarm(uint8_t alarmNum) {
 
 // Функция для проверки статуса будильника
 void printAlarmStatus() {
-    Serial.print("\n\n=== Статус будильников ===");
+    Serial.println("\n\n=== Статус будильников ===");
     
     auto printAlarmInfo = [](const AlarmSettings &alarm, uint8_t num) {
         Serial.printf("Будильник %d: ", num);

@@ -19,6 +19,7 @@ void handleCommand(String command) {
         switch (currentMenuState) {
             case MENU_MAIN: handleMainMenu(command); break;
             case MENU_TIME: handleTimeMenu(command); break;
+            case MENU_ALARMS: handleAlarmMenu(command); break;
             case MENU_WIFI: handleWifiMenu(command); break;
             case MENU_INFO: handleInfoMenu(command); break;
             case MENU_CONFIG: handleConfigMenu(command); break;
@@ -40,12 +41,12 @@ void handleCommand(String command) {
     else if (command.equals("sync")) {
         syncTime();
     }
-    else if (command.startsWith("set time ")) {
-        String timeStr = command.substring(9);
+    else if (command.startsWith("set T ")) {
+        String timeStr = command.substring(6);
         setManualTime(timeStr);
     }
-    else if (command.startsWith("set date ")) {
-        String dateStr = command.substring(9);
+    else if (command.startsWith("set D ")) {
+        String dateStr = command.substring(6);
         setManualDate(dateStr);
     }
     else {

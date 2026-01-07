@@ -5,6 +5,7 @@
 enum MenuState {
     MENU_MAIN,
     MENU_TIME,
+    MENU_ALARMS,
     MENU_WIFI,
     MENU_INFO,
     MENU_CONFIG,
@@ -20,8 +21,9 @@ void exitMenuMode();
 bool isInMenuMode();
 
 // Функции отображения меню
-void printMainMenu();
+void printMappingMenuCommands();
 void printTimeMenu();
+void printAlarmMenu();
 void printWifiMenu();
 void printInfoMenu();
 void printConfigMenu();
@@ -30,11 +32,15 @@ void printQuickHelp();
 // Обработчики меню
 void handleMainMenu(String command);
 void handleTimeMenu(String command);
+void handleAlarmMenu(String command);
 void handleWifiMenu(String command);
 void handleInfoMenu(String command);
 void handleConfigMenu(String command);
 
-// Вспомогательные
-void printSystemInfo();
+// Общая обработка часто повторяющихся команд: back, out, help
+// Возвращает true если команда обработана и дальнейшая логика не нужна
+bool handleCommonMenuCommands(const String &command, void (*printMenu)());
+
+// Вспомогательные функции
 void printSettings();
 //void handleTimezoneCommand(String args);

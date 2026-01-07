@@ -32,7 +32,8 @@ void checkTimeSource() {
                 Wire.write(0x0F);
                 Wire.write(status & 0x7F);
                 Wire.endTransmission();
-                setDefaultTimeToAllSources();
+                setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
+                syncTime(); // Пробуем синхронизировать время
             }
         }
     }
@@ -293,7 +294,7 @@ bool syncTime() {
         blinkError(11);
         Serial.print("\n[NTP] Не удалось синхронизировать время!");
     } else {
-        Serial.print("\n[NTP] Синхронизация успешна!");
+        Serial.println("\n[NTP] Синхронизация успешна!");
     }
     
     return success;
