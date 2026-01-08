@@ -79,15 +79,6 @@ void loop() {
 void processSecondTick() {
     time_t currentTime = getCurrentUTCTime();
    
-    /* static time_t lastProcessedTime = 0;
-    
-    if (currentTime == lastProcessedTime) {
-        return;
-    }
-    
-    lastProcessedTime = currentTime;
-    */
-
     struct tm* tm_info = gmtime(&currentTime);
     uint8_t currentSecond = tm_info->tm_sec;
     

@@ -56,7 +56,7 @@ void setDefaultConfig() {
     config.time_config.manual_time_set = false;
     config.time_config.auto_timezone = true;      // Включаем автоопределение
     config.time_config.auto_sync_enabled = true;
-    config.time_config.auto_dst = true;           // Авто DST включено
+    config.time_config.auto_dst = false;           // Авто DST выключено — DST будет устанавливаться вручную
     config.time_config.dcf77_enabled = true;      // DCF77 включён
     
     // Имя пояса по умолчанию
@@ -83,7 +83,7 @@ void setDefaultConfig() {
     config.alarm2 = {0, 0, false};
     
     saveConfig();
-    Serial.print("\n\n[SYSTEM] Установлены настройки по умолчанию");
+    Serial.print("\n[SYSTEM] Установлены настройки по умолчанию\n");
 }
 
 void saveConfig() {

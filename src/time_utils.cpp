@@ -33,6 +33,7 @@ void checkTimeSource() {
                 Wire.write(status & 0x7F);
                 Wire.endTransmission();
                 setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
+                Serial.print("\nПопытка синхронизировать время с NTP...");
                 syncTime(); // Пробуем синхронизировать время
             }
         }
@@ -201,7 +202,15 @@ bool syncTime() {
     
     digitalWrite(LED_PIN, HIGH);
     Serial.print("\n\n[NTP] Попытка синхронизации...");
+    Serial.printf("\n[NTP] Режим пояса: %s (автоопределение пояса=%s)", 
+                 config.time_config.location_detected ? "из интернет (ezTime)" : "ручной сдвиг",
+                 config.time_config.auto_timezone ? "ВКЛ" : "ВЫКЛ");
     
+    // Use the current time source (may be external DS3231 or system RTC) as snapshot for offset detection
+    // This reflects what the device is currently displaying / using for time
+    time_t now_utc_snapshot = getCurrentUTCTime();
+    time_t before_sync_local = utcToLocal(now_utc_snapshot);
+
     bool success = false;
     
     // 1. Включаем WiFi
@@ -239,13 +248,42 @@ bool syncTime() {
             time_t utcTime = timeClient->getEpochTime();
             
             // Проверяем, что время валидное (не 1970 год)
-            if (utcTime > 1609459200) { // После 2021-01-01
+            // Используем порог: 2025-07-06 09:00:00 UTC (наше значение по умолчанию)
+            if (utcTime > 1751792400) { // После 2025-07-06 09:00 UTC
                 
                 // Выводим полученное UTC время
                 struct tm *tm_utc = gmtime(&utcTime);
                 Serial.printf("\n[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d", 
                            tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
                            tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
+
+                // Если включено автоопределение пояса — попытаться вычислить смещение
+                if (config.time_config.auto_timezone) {
+                    if (before_sync_local > 0) {
+                        int32_t delta = (int32_t)before_sync_local - (int32_t)utcTime; // seconds
+                        int32_t abs_delta = delta >= 0 ? delta : -delta;
+
+                        // Only accept if difference is at least 30 minutes (to avoid false 0 offsets)
+                        if (abs_delta >= 1800) {
+                            int8_t offset_hours = (int8_t)((delta >= 0) ? (delta + 1800) / 3600 : (delta - 1800) / 3600);
+
+                            // sanity check — plausible timezone range [-12, +14]
+                            if (offset_hours >= -12 && offset_hours <= 14) {
+                                setTimezoneOffset(offset_hours);
+                                config.time_config.location_detected = false; // offset-based
+                                saveConfig();
+                                // Показываем округлённый часовой пояс, чтобы исключить путаницу при неполном часе (например 3598 сек)
+                                Serial.printf("\n[NTP] Автоопределение пояса: найдено смещение %d сек (~UTC%+d), установлено %+d часов", delta, offset_hours, offset_hours);
+                            } else {
+                                Serial.printf("\n[NTP] Автоопределение пояса: вычисленное смещение %+d ч вне диапазона, игнорирую", (int)( (delta >= 0) ? (delta + 1800) / 3600 : (delta - 1800) / 3600));
+                            }
+                        } else {
+                            Serial.printf("\n[NTP] Автоопределение пояса: разница слишком мала (%d сек) — не меняю смещение", delta);
+                        }
+                    } else {
+                        Serial.print("\n[NTP] Автоопределение пояса: нет данных локального времени");
+                    }
+                }
                 
                 // Устанавливаем UTC время в систему
                 struct timeval tv = { utcTime, 0 };
@@ -305,20 +343,42 @@ bool printTime() {
     time_t utcTime = getCurrentUTCTime();
     
     if (utcTime > 0) {
+        
+        // Вывод локального времени
+        time_t local = utcToLocal(utcTime);
+        struct tm local_tm;
+        gmtime_r(&local, &local_tm);
+        char lbuf[128];
+        strftime(lbuf, sizeof(lbuf), "\nTime: %a %d.%m.%Y %H:%M:%S", &local_tm);
+        Serial.print(lbuf);
+        
+        // Timezone / DST info
+        if (config.time_config.location_detected && config.time_config.timezone_name[0] != '\0') {
+            Serial.printf(" (TZ: %s)", config.time_config.timezone_name);
+        } else {
+            Serial.printf(" (UTC%+d)", config.time_config.manual_offset);
+        }
+        Serial.printf(" DST:%s", (config.time_config.dst_active ? "ON" : "OFF"));
+
+        // Вывод UTC времени
         struct tm utc_tm;
         gmtime_r(&utcTime, &utc_tm);
         
-        char buf[64];
-        strftime(buf, sizeof(buf), "\n%a %d.%m.%Y %H:%M:%S UTC", &utc_tm);
+        char buf[128];
+        strftime(buf, sizeof(buf), "\n UTC: %a %d.%m.%Y %H:%M:%S", &utc_tm);
         Serial.print(buf);
-        
-        // Показываем текущий источник
+
+         // Показываем текущий источник
         if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
             Serial.print(" [DS3231]");
         } else {
             Serial.print(" [ESP32 RTC]");
         }
+
         
+
+       
+
         return true;
     }
     
@@ -349,7 +409,7 @@ void setDefaultTimeToAllSources() {
     
     time_t default_time = mktime(&default_tm);
 
-    
+    Serial.print("\n[SYNC] Устанавливаю время по умолчанию: 2025-07-06 09:00:00 UTC");
     // Устанавливаем во все источники
     setTimeToAllSources(default_time);
 }

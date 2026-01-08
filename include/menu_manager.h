@@ -43,4 +43,4 @@ bool handleCommonMenuCommands(const String &command, void (*printMenu)());
 
 // Вспомогательные функции
 void printSettings();
-//void handleTimezoneCommand(String args);
+void handleTimezoneCommand(String args);
