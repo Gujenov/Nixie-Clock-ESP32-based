@@ -37,8 +37,7 @@ void enterMenuMode() {
     Serial.println("3  Настройки WI-FI и NTP");
     Serial.println("4  Информация о системе");
     Serial.println("5  Конфигурация");
-
-    printMappingMenuCommands();  //Управление меню
+    Serial.println();
 }
 
 void exitMenuMode() {
@@ -101,8 +100,8 @@ void printTimeMenu() {
     Serial.println("\nУстановки времени:");
     Serial.println("  time, t           - Текущее время (UTC и локальное)");
     Serial.println("  sync              - Синхронизировать с NTP");
-    Serial.println("  set T HH:MM:SS    - Установить время");
-    Serial.println("  set D DD.MM.YYYY  - Установить дату");
+    Serial.println("  set T HH:MM:SS    - Установить локальное время");
+    Serial.println("  set D DD.MM.YYYY  - Установить локальную дату");
     
     Serial.println("\nУстановки поясов:");
     //Serial.println("  tz                - Информация о текущем поясе и настройке (ручной/авто)");
@@ -114,7 +113,8 @@ void printTimeMenu() {
 }
 
 bool handleCommonMenuCommands(const String &command, void (*printMenu)()) {
-    if (command.equals("back") || command.equals("b")) {
+    if (command.equals("menu") || command.equals("m")) {
+        // Переход в главное меню
         currentMenuState = MENU_MAIN;
         enterMenuMode();
         return true;
@@ -547,7 +547,7 @@ void printQuickHelp() {
 
     Serial.println("  time, t     - Текущее время");
     Serial.println("  sync        - Синхронизировать с NTP");
-    Serial.println("  menu, m     - Войти в режим настройки");
+    Serial.println("  menu, m     - Главное меню");
     Serial.println("  help, ?     - Это сообщение");
     Serial.println("==========================\n");
 }
@@ -598,7 +598,7 @@ void listNonDSTPresets() {
     Serial.println("\nВыбор пояса осуществляется по номеру.");
     Serial.println();
     Serial.println("Навигация:");
-    Serial.println("  back, b      - Назад в главное меню");
+    Serial.println("  back, b      - Назад (предыдущее меню)");
     Serial.println("  help, ?      - Показать это сообщение");
     Serial.println("  out, o       - Выход из режима настройки");
     Serial.println("==========================");
@@ -633,7 +633,7 @@ void listAvailableTimezones() {
     Serial.println("\nВыбор пояса осуществляется по номеру либо по имени.");
     Serial.println();
     Serial.println("Навигация:");
-    Serial.println("  back, b      - Назад в главное меню");
+    Serial.println("  back, b      - Назад (предыдущее меню)");
     Serial.println("  help, ?      - Показать это сообщение");
     Serial.println("  out, o       - Выход из режима настройки");
     Serial.println("==========================");
@@ -777,8 +777,7 @@ void disableAutoTimezone() {
 
 void printMappingMenuCommands() {
     Serial.println("\nНавигация:");
-    Serial.println("  back, b      - Назад в главное меню");
-    Serial.println("  help, ?      - Показать это сообщение");
+    Serial.println("  menu, m      - Главное меню");
     Serial.println("  out, o       - Выход из режима настройки");
     Serial.println("==========================\n");
 }

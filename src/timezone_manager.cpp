@@ -1,5 +1,6 @@
 #include "config.h"
 #include "timezone_manager.h"
+#include "menu_manager.h"
 #include <string.h>
 #include <ezTime.h>
 
@@ -362,17 +363,50 @@ void printTimezoneInfo() {
     // Текущая локация
     const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
     if (preset) {
-        Serial.printf("\n║ Zone Name: %-42s ║", preset->zone_name);
-        Serial.printf("\n║ Смещение: UTC%+d%-38s ║", config.time_config.current_offset, "");
+        Serial.printf("\n║ Time zone: %-42s ║", preset->zone_name);
+        Serial.printf("\n║ Базовое смещение: UTC%+d%-33s ║", preset->std_offset, "");
         
         // Информация о DST
         if (preset->dst_start_month > 0 && preset->dst_offset != preset->std_offset) {
             Serial.print("\n║ Переход на летнее/зимнее время: используется         ║");
+            
+            // Показываем текущее время (летнее/зимнее)
+            if (config.time_config.current_dst_active) {
+                // "Текущее время: летнее (UTC+2)" - вычисляем длину
+                char time_str[60];
+                sprintf(time_str, "Текущее время: летнее (UTC%+d)", config.time_config.current_offset);
+                int visual_len = 0;
+                for (const char* s = time_str; *s; s++) {
+                    if ((*s & 0xC0) != 0x80) visual_len++;
+                }
+                int padding = 54 - visual_len;  // Целевая ширина 54 символа
+                if (padding < 0) padding = 0;
+                
+                Serial.print("\n║ ");
+                Serial.print(time_str);
+                for (int j = 0; j < padding; j++) Serial.print(" ");
+                Serial.print("║");
+            } else {
+                // "Текущее время: зимнее (UTC+1)" - вычисляем длину
+                char time_str[60];
+                sprintf(time_str, "Текущее время: зимнее (UTC%+d)", config.time_config.current_offset);
+                int visual_len = 0;
+                for (const char* s = time_str; *s; s++) {
+                    if ((*s & 0xC0) != 0x80) visual_len++;
+                }
+                int padding = 54 - visual_len;  // Целевая ширина 54 символа
+                if (padding < 0) padding = 0;
+                
+                Serial.print("\n║ ");
+                Serial.print(time_str);
+                for (int j = 0; j < padding; j++) Serial.print(" ");
+                Serial.print("║");
+            }
         } else {
             Serial.print("\n║ Переход на летнее/зимнее время: не используется       ║");
         }
     } else {
-        Serial.printf("\n║ Zone Name: %-42s ║", config.time_config.timezone_name);
+        Serial.printf("\n║ Time zone: %-42s ║", config.time_config.timezone_name);
         Serial.print("\n║ ОШИБКА: Локация не найдена в таблице                 ║");
     }
     
@@ -382,9 +416,9 @@ void printTimezoneInfo() {
 void listAvailableTimezones() {
     Serial.print("\n╔════════════════════════════════════════════════════════════════════╗");
     Serial.print("\n║                    ДОСТУПНЫЕ ЧАСОВЫЕ ПОЯСА                         ║");
-    Serial.print("\n╠════╦═══════════════════════════════════╦══════════╦════════════════╣");
-    Serial.print("\n║ #  ║ Локация                           ║ Смещение ║ DST            ║");
-    Serial.print("\n╠════╬═══════════════════════════════════╬══════════╬════════════════╣");
+    Serial.print("\n╠════╦═══════════════════════════════════════╦══════════╦════════════╣");
+    Serial.print("\n║ #  ║ Локация                               ║ Смещение ║ DST        ║");
+    Serial.print("\n╠════╬═══════════════════════════════════════╬══════════╬════════════╣");
     
     // Отслеживаем регионы для разделителей
     const char* current_region = "";
@@ -409,7 +443,7 @@ void listAvailableTimezones() {
         // Печатаем разделитель, если регион изменился
         if (strcmp(current_region, new_region) != 0) {
             if (i > 0) {
-                Serial.print("\n╠════╬═══════════════════════════════════╬══════════╬════════════════╣");
+                Serial.print("\n╠════╬═══════════════════════════════════════╬══════════╬════════════╣");
             }
             
             // Вычисляем визуальную длину названия региона
@@ -417,16 +451,16 @@ void listAvailableTimezones() {
             for (const char* s = new_region; *s; s++) {
                 if ((*s & 0xC0) != 0x80) region_visual_len++;
             }
-            int region_padding = 37 - region_visual_len;
+            int region_padding = 38 - region_visual_len;  // Изменено с 37 на 38 для дополнительного пробела
             if (region_padding < 0) region_padding = 0;
             
             // Выводим разделитель региона с правильным выравниванием
             Serial.print("\n║    ║ ");
             Serial.print(new_region);
             for (int j = 0; j < region_padding; j++) Serial.print(" ");
-            Serial.print(" ║          ║                ║");
+            Serial.print("║          ║            ║");
             
-            Serial.print("\n╠════╬═══════════════════════════════════╬══════════╬════════════════╣");
+            Serial.print("\n╠════╬═══════════════════════════════════════╬══════════╬════════════╣");
             current_region = new_region;
         }
         
@@ -439,7 +473,7 @@ void listAvailableTimezones() {
             dst_str = "Есть";
         } else {
             sprintf(offset_str, "UTC%+d", p->std_offset);
-            dst_str = "Нет ";  // Добавляем пробел для выравнивания с "Есть"
+            dst_str = "Нет";  // Убрали лишний пробел
         }
         
         // Вычисляем визуальную длину строки (количество символов, а не байтов)
@@ -458,12 +492,8 @@ void listAvailableTimezones() {
         Serial.printf(" ║ %-8s ║ %-14s ║", offset_str, dst_str);
     }
     
-    Serial.print("\n╚════╩═══════════════════════════════════╩══════════╩════════════════╝");
-    Serial.print("\n\nДля выбора локации часовой зоны введите её цифровое обозначение");
-    Serial.print("\n\nНавигация:");
-    Serial.print("\n  back, b      - Назад в главное меню");
-    Serial.print("\n  help, ?      - Показать это сообщение");
-    Serial.print("\n  out, o       - Выход из режима настройки");
-    Serial.print("\n==========================");
-    Serial.print("\n> ");
+    Serial.print("\n╚════╩═══════════════════════════════════════╩══════════╩════════════╝");
+    Serial.print("\n\nДля выбора локации часовой зоны введите её цифровое обозначение\n");
+    printMappingMenuCommands();
+    Serial.print("> ");
 }

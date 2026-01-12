@@ -76,6 +76,7 @@ void checkTimeSource() {
             }
             
             setupInterrupts();
+
         }
     }
     
@@ -114,9 +115,9 @@ void checkTimeSource() {
     // Выводим сообщение о подключении (если нужно)
     if (showConnectionMessage && ds3231_available) {
         if (diff > 5) {
-            Serial.printf("\n[SYNC] DS3231 подключен, синхронизация (расхождение: %ld сек)", diff);
+            Serial.printf("\n[DS3231] -> [RTC] синхронизация (расхождение: %ld сек)", diff);
         } else {
-            Serial.print("\n[SYNC] DS3231 подключен, время совпадает");
+            Serial.print("\n[DS3231] -> [RTC] время совпадает");
         }
     }
     
@@ -253,22 +254,34 @@ bool syncTime() {
                 // Устанавливаем UTC время в систему
                 struct timeval tv = { utcTime, 0 };
                 settimeofday(&tv, NULL);
-                Serial.print("\n[NTP]->[RTC] Время записано во внутренний RTC");
+                Serial.print("\n[NTP] -> [RTC] Время записано во внутренний RTC");
                 
                 // Записываем в DS3231 ТОЖЕ UTC
                 if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
                     DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
                     rtc->adjust(rtcTime);
-                    Serial.print("\n[NTP]->[DS3231] Время записано в аппаратные часы");
+                    Serial.print("\n[NTP] -> [DS3231] Время записано в аппаратные часы");
                 }
                 
                 // Показываем информацию о режиме работы с часовыми поясами
                 if (config.time_config.automatic_localtime) {
                     Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
-                    Serial.printf("\n[NTP] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+                    Serial.printf("\n[TZ] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+                    
+                    // Получаем и выводим данные от ezTime
+                    time_t local_time = utcToLocal(utcTime);  // Это обновит current_offset и current_dst_active
+                    Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
+                                 config.time_config.current_offset,
+                                 config.time_config.current_dst_active ? "ON" : "OFF");
                 } else {
                     Serial.print("\n[TZ] Включено ручное определение локального времени.");
-                    Serial.printf("\n[NTP] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
+                    Serial.printf("\n[TZ] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
+                    
+                    // Получаем данные из таблицы
+                    time_t local_time = utcToLocal(utcTime);  // Это обновит current_offset и current_dst_active
+                    Serial.printf("\n[TZ] Данные из таблицы: UTC%+d, DST: %s", 
+                                 config.time_config.current_offset,
+                                 config.time_config.current_dst_active ? "ON" : "OFF");
                 }
                 
                
@@ -429,7 +442,7 @@ bool setManualTime(const String &timeStr) {
     // 5. Устанавливаем во все источники через единую функцию
     setTimeToAllSources(newTime_utc);
     
-    Serial.printf("\n✅ Время установлено: %02d:%02d:%02d UTC", hours, minutes, seconds);
+    Serial.printf("\n✅ Время установлено: %02d:%02d:%02d", hours, minutes, seconds);
     //printTime();
     return true;
 }
@@ -495,7 +508,7 @@ bool setManualDate(const String &dateStr) {
     // 4. Устанавливаем во все источники
     setTimeToAllSources(newTime_utc);
     
-    Serial.printf("\n✅ Дата установлена: %02d.%02d.%04d UTC", day, month, year);
+    Serial.printf("\n✅ Дата установлена: %02d.%02d.%04d", day, month, year);
     //printTime();
     return true;
 }

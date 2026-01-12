@@ -5,10 +5,10 @@
 
 // ========== СТРУКТУРА ПРЕСЕТА ЧАСОВОГО ПОЯСА ==========
 struct TimezonePreset {
-    const char* zone_name;       // "Europe/Moscow"
-    const char* display_name;    // "Москва (MSK)"
-    int8_t std_offset;           // Стандартное смещение в часах (UTC+3 = 3)
-    int8_t dst_offset;           // DST смещение в часах (UTC+4 = 4), 0 если нет DST
+    const char* zone_name;       // "Europe/Warsaw"
+    const char* display_name;    // "Варшава"
+    int8_t std_offset;           // Стандартное смещение в часах (UTC+1 = 1)
+    int8_t dst_offset;           // DST смещение в часах (UTC+2 = 2), 0 если нет DST
     
     // Правила DST (если используются)
     uint8_t dst_start_month;     // Месяц начала DST (1-12), 0 если нет DST

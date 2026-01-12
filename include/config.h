@@ -26,8 +26,8 @@
 #define BUTTON_VERY_LONG 3
 
 // Часовые пояса по умолчанию
-#define DEFAULT_TIMEZONE_OFFSET 3    // UTC+3 (Москва)
-#define DEFAULT_TIMEZONE_NAME "Europe/Moscow"  //
+#define DEFAULT_TIMEZONE_OFFSET 1    // UTC+1 (Варшава)
+#define DEFAULT_TIMEZONE_NAME "Europe/Warsaw"  //
 
 struct AlarmSettings {
     uint8_t hour;
