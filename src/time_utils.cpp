@@ -124,11 +124,12 @@ void checkTimeSource() {
     static bool firstRunMessage = true;
     if (firstRunMessage && !ds3231_available && !rtc) {
         currentTimeSource = INTERNAL_RTC;
-        Serial.print("\n\n✓ Используются внутренние часы RTC");
+        Serial.print("\n✓ Используются внутренние часы RTC");
         setDefaultTimeToAllSources();
         setupInterrupts();
         firstRunMessage = false;
     }
+
 }
 
 time_t getCurrentUTCTime() {
@@ -202,15 +203,7 @@ bool syncTime() {
     
     digitalWrite(LED_PIN, HIGH);
     Serial.print("\n\n[NTP] Попытка синхронизации...");
-    Serial.printf("\n[NTP] Режим пояса: %s (автоопределение пояса=%s)", 
-                 config.time_config.location_detected ? "из интернет (ezTime)" : "ручной сдвиг",
-                 config.time_config.auto_timezone ? "ВКЛ" : "ВЫКЛ");
     
-    // Use the current time source (may be external DS3231 or system RTC) as snapshot for offset detection
-    // This reflects what the device is currently displaying / using for time
-    time_t now_utc_snapshot = getCurrentUTCTime();
-    time_t before_sync_local = utcToLocal(now_utc_snapshot);
-
     bool success = false;
     
     // 1. Включаем WiFi
@@ -257,34 +250,6 @@ bool syncTime() {
                            tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
                            tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
 
-                // Если включено автоопределение пояса — попытаться вычислить смещение
-                if (config.time_config.auto_timezone) {
-                    if (before_sync_local > 0) {
-                        int32_t delta = (int32_t)before_sync_local - (int32_t)utcTime; // seconds
-                        int32_t abs_delta = delta >= 0 ? delta : -delta;
-
-                        // Only accept if difference is at least 30 minutes (to avoid false 0 offsets)
-                        if (abs_delta >= 1800) {
-                            int8_t offset_hours = (int8_t)((delta >= 0) ? (delta + 1800) / 3600 : (delta - 1800) / 3600);
-
-                            // sanity check — plausible timezone range [-12, +14]
-                            if (offset_hours >= -12 && offset_hours <= 14) {
-                                setTimezoneOffset(offset_hours);
-                                config.time_config.location_detected = false; // offset-based
-                                saveConfig();
-                                // Показываем округлённый часовой пояс, чтобы исключить путаницу при неполном часе (например 3598 сек)
-                                Serial.printf("\n[NTP] Автоопределение пояса: найдено смещение %d сек (~UTC%+d), установлено %+d часов", delta, offset_hours, offset_hours);
-                            } else {
-                                Serial.printf("\n[NTP] Автоопределение пояса: вычисленное смещение %+d ч вне диапазона, игнорирую", (int)( (delta >= 0) ? (delta + 1800) / 3600 : (delta - 1800) / 3600));
-                            }
-                        } else {
-                            Serial.printf("\n[NTP] Автоопределение пояса: разница слишком мала (%d сек) — не меняю смещение", delta);
-                        }
-                    } else {
-                        Serial.print("\n[NTP] Автоопределение пояса: нет данных локального времени");
-                    }
-                }
-                
                 // Устанавливаем UTC время в систему
                 struct timeval tv = { utcTime, 0 };
                 settimeofday(&tv, NULL);
@@ -297,12 +262,16 @@ bool syncTime() {
                     Serial.print("\n[NTP]->[DS3231] Время записано в аппаратные часы");
                 }
                 
-                // УДАЛЕНА строка с локальным временем и DST
-                // struct tm *tm_local = localtime(&utcTime);
-                // Serial.printf("\n[NTP] Локальное время: %02d:%02d:%02d (TZ=%+d, DST=%s)",
-                //        tm_local->tm_hour, tm_local->tm_min, tm_local->tm_sec,
-                //        config.time_config.timezone_offset, 
-                //        config.time_config.dst_enabled ? "ON" : "OFF");
+                // Показываем информацию о режиме работы с часовыми поясами
+                if (config.time_config.automatic_localtime) {
+                    Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
+                    Serial.printf("\n[NTP] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+                } else {
+                    Serial.print("\n[TZ] Включено ручное определение локального времени.");
+                    Serial.printf("\n[NTP] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
+                }
+                
+               
                               
                 // Обновляем время последней синхронизации в конфиге
                 config.time_config.last_ntp_sync = utcTime;
@@ -352,13 +321,15 @@ bool printTime() {
         strftime(lbuf, sizeof(lbuf), "\nTime: %a %d.%m.%Y %H:%M:%S", &local_tm);
         Serial.print(lbuf);
         
-        // Timezone / DST info
-        if (config.time_config.location_detected && config.time_config.timezone_name[0] != '\0') {
-            Serial.printf(" (TZ: %s)", config.time_config.timezone_name);
-        } else {
-            Serial.printf(" (UTC%+d)", config.time_config.manual_offset);
+        // Timezone info
+        Serial.printf(" (TZ: %s) UTC%+d", 
+                     config.time_config.timezone_name,
+                     config.time_config.current_offset);
+        
+        // DST info - показываем только если активен
+        if (config.time_config.current_dst_active) {
+            Serial.print(", DST ON");
         }
-        Serial.printf(" DST:%s", (config.time_config.dst_active ? "ON" : "OFF"));
 
         // Вывод UTC времени
         struct tm utc_tm;

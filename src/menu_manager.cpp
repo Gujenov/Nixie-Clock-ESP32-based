@@ -1,6 +1,7 @@
 #include "menu_manager.h"
 #include "config.h"
 #include "time_utils.h"
+#include "timezone_manager.h"
 #include "hardware.h"
 #include "alarm_handler.h"
 #include <Arduino.h> 
@@ -9,6 +10,13 @@ extern bool printEnabled;
 
 MenuState currentMenuState = MENU_MAIN;
 bool inMenuMode = false;
+
+// Прототипы вспомогательных функций
+// printTimezoneInfo и listAvailableTimezones теперь в timezone_manager.h
+void setManualTimezone(String tz_name);
+void setManualTimezoneOffset(int offset);
+void enableAutoTimezone();
+void disableAutoTimezone();
 
 // ======================= УПРАВЛЕНИЕ РЕЖИМОМ МЕНЮ =======================
 
@@ -87,6 +95,9 @@ void handleMainMenu(String command) {
 
 void printTimeMenu() {
     Serial.println("\n=== НАСТРОЙКИ ВРЕМЕНИ И ЧАСОВЫХ ПОЯСОВ ===");
+    
+    printTimezoneInfo();
+    
     Serial.println("\nУстановки времени:");
     Serial.println("  time, t           - Текущее время (UTC и локальное)");
     Serial.println("  sync              - Синхронизировать с NTP");
@@ -94,9 +105,8 @@ void printTimeMenu() {
     Serial.println("  set D DD.MM.YYYY  - Установить дату");
     
     Serial.println("\nУстановки поясов:");
-    Serial.println("  tz                - Информация о текущем поясе и настройке (ручной/авто)");
-    Serial.println("  DTS list, DTSs    - Выбор доступных поясов");
-    Serial.println("  tz set [NAME]     - Установить пояс (Europe/Warsaw)");
+    //Serial.println("  tz                - Информация о текущем поясе и настройке (ручной/авто)");
+    Serial.println("  tz list, tzl      - Выбор доступных поясов");
     Serial.println("  tz auto, tza      - Автоматическое определение пояса");
     Serial.println("  tz manual, tzm    - Отключить автоопределение");
 
@@ -122,16 +132,8 @@ bool handleCommonMenuCommands(const String &command, void (*printMenu)()) {
 
 // ======================= ОБРАБОТКА ЧАСОВЫХ ПОЯСОВ =======================
 
-// Прототипы вспомогательных функций, определены ниже
-void printTimezoneInfo();
-void listAvailableTimezones();
-void listNonDSTPresets();
-void setManualTimezone(String tz_name);
-void setManualTimezoneOffset(int offset);
-void enableAutoTimezone();
-void disableAutoTimezone();
-
 // Общий список пресетов часовых поясов (гибрид: offset-пресеты + именованные зоны)
+// offset: стандартное смещение (используется как fallback если ezTime не доступен)
 struct TZPreset { const char* display; const char* zone_name; int8_t offset; bool is_offset; bool has_dst; };
 static const TZPreset tz_presets[] = {
     {"Offset: UTC-12", nullptr, -12, true, false},
@@ -147,34 +149,34 @@ static const TZPreset tz_presets[] = {
     {"Offset: UTC+1 (Central Europe)", nullptr, 1, true, false},
     {"Offset: UTC+2 (Eastern Europe)", nullptr, 2, true, false},
     {"Offset: UTC+3", nullptr, 3, true, false},
-    {"Asia/Tokyo (Japan)", "Asia/Tokyo", 0, false, false},
-    {"Asia/Shanghai (China)", "Asia/Shanghai", 0, false, false},
-    {"Asia/Seoul (Korea)", "Asia/Seoul", 0, false, false},
-    {"Asia/Singapore", "Asia/Singapore", 0, false, false},
-    {"Asia/Kolkata (India)", "Asia/Kolkata", 0, false, false},
-    {"Asia/Bangkok (Thailand)", "Asia/Bangkok", 0, false, false},
-    {"Europe/Warsaw (Poland) - DST", "Europe/Warsaw", 0, false, true},
-    {"Europe/Kyiv (Ukraine) - DST", "Europe/Kyiv", 0, false, true},
-    {"Europe/Berlin (Germany) - DST", "Europe/Berlin", 0, false, true},
-    {"Europe/Paris (France) - DST", "Europe/Paris", 0, false, true},
-    {"Europe/London (UK) - DST", "Europe/London", 0, false, true},
-    {"Europe/Moscow (Russia)", "Europe/Moscow", 0, false, false},
-    {"Europe/Madrid (Spain) - DST", "Europe/Madrid", 0, false, true},
-    {"Europe/Rome (Italy) - DST", "Europe/Rome", 0, false, true},
-    {"America/New_York (USA-East) - DST", "America/New_York", 0, false, true},
-    {"America/Chicago (USA-Central) - DST", "America/Chicago", 0, false, true},
-    {"America/Denver (USA-Mountain) - DST", "America/Denver", 0, false, true},
-    {"America/Los_Angeles (USA-West) - DST", "America/Los_Angeles", 0, false, true},
-    {"America/Anchorage (Alaska)", "America/Anchorage", 0, false, true},
-    {"America/Halifax (Canada-Atlantic) - DST", "America/Halifax", 0, false, true},
-    {"America/Toronto (Canada-East) - DST", "America/Toronto", 0, false, true},
-    {"America/Vancouver (Canada-West) - DST", "America/Vancouver", 0, false, true},
-    {"America/Sao_Paulo (Brazil)", "America/Sao_Paulo", 0, false, false},
-    {"America/Buenos_Aires (Argentina)", "America/Argentina/Buenos_Aires", 0, false, false},
-    {"Africa/Cairo (Egypt)", "Africa/Cairo", 0, false, false},
-    {"Africa/Johannesburg (South Africa)", "Africa/Johannesburg", 0, false, false},
-    {"Australia/Sydney (Australia) - DST", "Australia/Sydney", 0, false, true},
-    {"Pacific/Auckland (New Zealand) - DST", "Pacific/Auckland", 0, false, true},
+    {"Asia/Tokyo (Japan)", "Asia/Tokyo", 9, false, false},
+    {"Asia/Shanghai (China)", "Asia/Shanghai", 8, false, false},
+    {"Asia/Seoul (Korea)", "Asia/Seoul", 9, false, false},
+    {"Asia/Singapore", "Asia/Singapore", 8, false, false},
+    {"Asia/Kolkata (India)", "Asia/Kolkata", 5, false, false},  // UTC+5:30 -> округлено до 5
+    {"Asia/Bangkok (Thailand)", "Asia/Bangkok", 7, false, false},
+    {"Europe/Warsaw (Poland) - DST", "Europe/Warsaw", 1, false, true},  // CET = UTC+1 (зимой)
+    {"Europe/Kyiv (Ukraine) - DST", "Europe/Kyiv", 2, false, true},    // EET = UTC+2 (зимой)
+    {"Europe/Berlin (Germany) - DST", "Europe/Berlin", 1, false, true},
+    {"Europe/Paris (France) - DST", "Europe/Paris", 1, false, true},
+    {"Europe/London (UK) - DST", "Europe/London", 0, false, true},     // GMT = UTC+0 (зимой)
+    {"Europe/Moscow (Russia)", "Europe/Moscow", 3, false, false},
+    {"Europe/Madrid (Spain) - DST", "Europe/Madrid", 1, false, true},
+    {"Europe/Rome (Italy) - DST", "Europe/Rome", 1, false, true},
+    {"America/New_York (USA-East) - DST", "America/New_York", -5, false, true},  // EST = UTC-5 (зимой)
+    {"America/Chicago (USA-Central) - DST", "America/Chicago", -6, false, true},
+    {"America/Denver (USA-Mountain) - DST", "America/Denver", -7, false, true},
+    {"America/Los_Angeles (USA-West) - DST", "America/Los_Angeles", -8, false, true},
+    {"America/Anchorage (Alaska)", "America/Anchorage", -9, false, true},
+    {"America/Halifax (Canada-Atlantic) - DST", "America/Halifax", -4, false, true},
+    {"America/Toronto (Canada-East) - DST", "America/Toronto", -5, false, true},
+    {"America/Vancouver (Canada-West) - DST", "America/Vancouver", -8, false, true},
+    {"America/Sao_Paulo (Brazil)", "America/Sao_Paulo", -3, false, false},
+    {"America/Buenos_Aires (Argentina)", "America/Argentina/Buenos_Aires", -3, false, false},
+    {"Africa/Cairo (Egypt)", "Africa/Cairo", 2, false, false},
+    {"Africa/Johannesburg (South Africa)", "Africa/Johannesburg", 2, false, false},
+    {"Australia/Sydney (Australia) - DST", "Australia/Sydney", 10, false, true},
+    {"Pacific/Auckland (New Zealand) - DST", "Pacific/Auckland", 12, false, true},
 };
 static const int tz_preset_count = sizeof(tz_presets)/sizeof(tz_presets[0]);
 
@@ -204,30 +206,48 @@ void handleTimeMenu(String command) {
     else {
         // If we're in an interactive timezone list mode, handle numeric or direct selections first
         if (tz_list_state == 1) {
-            // top-level selection: '1' -> non-DST submenu, '2..' -> DST named zone selection
+            // Проверяем, является ли ввод числом
             bool isNum = true;
-            for (size_t i = 0; i < command.length(); ++i) if (!isDigit(command[i])) { isNum = false; break; }
+            for (size_t i = 0; i < command.length(); ++i) {
+                if (!isDigit(command[i])) { 
+                    isNum = false; 
+                    break; 
+                }
+            }
+            
             if (isNum && command.length() > 0) {
                 int num = command.toInt();
-                if (num == 1) { listNonDSTPresets(); return; }
-                if (num >= 2) {
-                    int idx = num - 2;
-                    if (idx >= 0 && idx < dst_zone_count) {
-                        int presetIndex = dst_zone_indices[idx];
-                        if (setTimezone(tz_presets[presetIndex].zone_name)) {
-                            Serial.printf("Пояс установлен: %s\n", tz_presets[presetIndex].zone_name);
+                uint8_t count = getPresetsCount();
+                
+                if (num >= 1 && num <= count) {
+                    // Получаем preset по индексу (индекс = номер - 1)
+                    const TimezonePreset* preset = getPresetByIndex(num - 1);
+                    if (preset) {
+                        // Устанавливаем часовой пояс
+                        if (setTimezone(preset->zone_name)) {
+                            Serial.printf("\n[TZ] Установлена зона: %s\n", preset->display_name);
                             saveConfig();
                         } else {
-                            Serial.println("Не удалось установить выбранный пояс");
+                            Serial.printf("\n[TZ] Ошибка при установке зоны: %s\n", preset->zone_name);
                         }
                         tz_list_state = 0;
                         return;
                     }
+                } else {
+                    Serial.printf("\nНеверный номер. Введите число от 1 до %d\n", count);
+                    tz_list_state = 0;
+                    return;
                 }
             }
-            // allow name entry even in top-level (e.g., 'Europe/Warsaw')
-            if (command.indexOf('/') >= 0) {
-                setManualTimezone(command);
+            
+            // Разрешаем ввод имени зоны напрямую (например, 'Europe/Warsaw')
+            if (command.indexOf('/') >= 0 || command.equals("CET")) {
+                if (setTimezone(command.c_str())) {
+                    Serial.printf("\n[TZ] Установлена зона: %s\n", command.c_str());
+                    saveConfig();
+                } else {
+                    Serial.printf("\n[TZ] Зона не найдена: %s\n", command.c_str());
+                }
                 tz_list_state = 0;
                 return;
             }
@@ -240,10 +260,10 @@ void handleTimeMenu(String command) {
                 if (sel >= 1 && sel <= non_dst_count) {
                     int presetIndex = non_dst_indices[sel-1];
                     if (setTimezoneOffset(tz_presets[presetIndex].offset)) {
-                        Serial.printf("Ручное смещение установлено: UTC%+d\n", tz_presets[presetIndex].offset);
+                        Serial.printf("\nРучное смещение установлено: UTC%+d\n", tz_presets[presetIndex].offset);
                         saveConfig();
                     } else {
-                        Serial.println("Ошибка при установке смещения");
+                        Serial.println("\nОшибка при установке смещения");
                     }
                     tz_list_state = 0;
                     return;
@@ -255,8 +275,10 @@ void handleTimeMenu(String command) {
         String cmdLower = command;
         cmdLower.toLowerCase();
 
-        if (cmdLower.equals("dts list") || cmdLower.equals("dtss") || cmdLower.equals("dtss list")) {
-            listAvailableTimezones();
+        if (cmdLower.equals("tz list") || cmdLower.equals("tzl")) {
+            // Используем новую функцию из timezone_manager
+            ::listAvailableTimezones();
+            tz_list_state = 1;  // Активируем режим выбора зоны
             return;
         }
         if (cmdLower.equals("tza")) {
@@ -266,15 +288,6 @@ void handleTimeMenu(String command) {
         }
         if (cmdLower.equals("tzm")) {
             disableAutoTimezone();
-            tz_list_state = 0;
-            return;
-        }
-
-        if (command.equals("tz") || command.startsWith("tz ")) {
-            // pass arguments after 'tz ' (or empty string when just 'tz')
-            String args = "";
-            if (command.length() > 2) args = command.substring(3);
-            handleTimezoneCommand(args);
             tz_list_state = 0;
             return;
         }
@@ -539,81 +552,26 @@ void printQuickHelp() {
     Serial.println("==========================\n");
 }
 
-
-void handleTimezoneCommand(String args) {
-    args.trim();
-    
-    if (args.equals("") || args.equals("info")) {
-        printTimezoneInfo();
-    }
-    else if (args.equals("list")) {
-        listAvailableTimezones();
-    }
-    else if (args.startsWith("set ")) {
-        String tz_name = args.substring(4);
-        setManualTimezone(tz_name);
-    }
-    else if (args.startsWith("offset ")) {
-        String offset_str = args.substring(7);
-        int offset = offset_str.toInt();
-        setManualTimezoneOffset(offset);
-    }
-    else if (args.equals("auto")) {
-        enableAutoTimezone();
-    }
-    else if (args.equals("manual")) {
-        disableAutoTimezone();
-    }
-    else if (args.equals("dst on")) {
-        config.time_config.dst_enabled = true;
-        config.time_config.dst_active = true;
-        saveConfig();
-        Serial.println("DST включен вручную");
-    }
-    else if (args.equals("dst off")) {
-        config.time_config.dst_enabled = false;
-        config.time_config.dst_active = false;
-        saveConfig();
-        Serial.println("DST отключён вручную");
-    }
-    else {
-        Serial.println("Неизвестная команда часового пояса");
-    }
-}
-
 // Вспомогательные функции (реализация)
 
 void printSettings() {
     Serial.println("\n=== ТЕКУЩАЯ КОНФИГУРАЦИЯ ===");
     Serial.println("(Небольшая часть параметров приведена ниже)");
     // Пример вывода основных настроек
-    Serial.print("Timezone: ");
-    Serial.println(config.time_config.timezone_name[0] ? config.time_config.timezone_name : "(не установлен)");
-    Serial.print("Manual offset: ");
-    Serial.print(config.time_config.manual_offset);
-    Serial.println(" часов");
-    Serial.print("Auto timezone: ");
-    Serial.println(config.time_config.auto_timezone ? "ENABLED" : "DISABLED");
-    Serial.print("DST enabled: ");
-    Serial.println(config.time_config.dst_enabled ? "YES" : "NO");
+    Serial.print("Локация: ");
+    Serial.println(config.time_config.timezone_name[0] ? config.time_config.timezone_name : "(не установлена)");
+    Serial.print("Режим: ");
+    Serial.println(config.time_config.automatic_localtime ? "ezTime (online)" : "Таблица (offline)");
+    Serial.print("Текущее смещение: UTC");
+    Serial.println(config.time_config.current_offset >= 0 ? "+" : "");
+    Serial.println(config.time_config.current_offset);
+    Serial.print("DST активен: ");
+    Serial.println(config.time_config.current_dst_active ? "YES" : "NO");
 }
 
-void printTimezoneInfo() {
-    Serial.println("\n=== ИНФОРМАЦИЯ О ЧАСОВОМ ПОЯСЕ ===\n");
-    Serial.print("Timezone name: ");
-    Serial.println(config.time_config.timezone_name[0] ? config.time_config.timezone_name : "(не установлен)");
-    Serial.print("Manual offset (hours): ");
-    Serial.println(config.time_config.manual_offset);
-    Serial.print("Auto timezone: ");
-    Serial.println(config.time_config.auto_timezone ? "ENABLED" : "DISABLED");
-    Serial.print("DST active: ");
-    Serial.println(config.time_config.dst_active ? "YES" : "NO");
-    if (config.time_config.location_detected) {
-        Serial.print("Detected timezone: ");
-        Serial.println(config.time_config.detected_tz);
-    }
-}
+// printTimezoneInfo() теперь определена в timezone_manager.cpp
 
+/* СТАРАЯ ФУНКЦИЯ - ЗАКОММЕНТИРОВАНА
 void listNonDSTPresets() {
     // Build non-DST index if not built
     non_dst_count = 0;
@@ -647,7 +605,9 @@ void listNonDSTPresets() {
 
     tz_list_state = 2; // now in non-DST submenu
 }
+*/  // КОНЕЦ ЗАКОММЕНТИРОВАННОЙ listNonDSTPresets
 
+/* СТАРАЯ ФУНКЦИЯ - ЗАКОММЕНТИРОВАНА
 void listAvailableTimezones() {
     // Build indexes
     dst_zone_count = 0;
@@ -680,6 +640,7 @@ void listAvailableTimezones() {
 
     tz_list_state = 1; // waiting for top-level selection
 }
+*/  // КОНЕЦ ЗАКОММЕНТИРОВАННОЙ listAvailableTimezones
 
 void setManualTimezone(String tz_name) {
     tz_name.trim();
@@ -695,8 +656,8 @@ void setManualTimezone(String tz_name) {
         if (isNumber) {
             int num = tz_name.toInt();
             if (num == 1) {
-                // show non-DST submenu
-                listNonDSTPresets();
+                // Показываем список из новой системы
+                ::listAvailableTimezones();
                 return;
             }
             if (num >= 2) {
@@ -739,12 +700,27 @@ void setManualTimezone(String tz_name) {
                 Serial.println("Ошибка при установке смещения пресета");
             }
         } else {
+            // Именованная зона - пытаемся через ezTime
             if (setTimezone(p.zone_name)) {
-                Serial.printf("Пояс установлен: %s\n", p.zone_name);
+                Serial.printf("Пояс установлен через ezTime: %s\n", p.zone_name);
                 Serial.printf("Поддержка DST: %s\n", p.has_dst ? "YES" : "NO");
                 saveConfig();
             } else {
-                Serial.printf("Не удалось установить пояс %s. Вы можете установить смещение вручную.\n", p.zone_name);
+                // Fallback на ручное смещение из пресета
+                Serial.printf("[TZ] ezTime недоступен, используем fallback смещение UTC%+d для %s\n", 
+                             p.offset, p.zone_name);
+                if (setTimezoneOffset(p.offset)) {
+                    Serial.printf("Установлено ручное смещение: UTC%+d (%s)\n", p.offset, p.zone_name);
+                    // Сохраняем имя зоны для информации
+                    strncpy(config.time_config.timezone_name, p.zone_name, 
+                           sizeof(config.time_config.timezone_name));
+                    config.time_config.timezone_name[sizeof(config.time_config.timezone_name)-1] = '\0';
+                    Serial.printf("Поддержка DST: %s (управление вручную через 'tz dst on/off')\n", 
+                                 p.has_dst ? "YES" : "NO");
+                    saveConfig();
+                } else {
+                    Serial.println("Ошибка при установке fallback смещения");
+                }
             }
         }
         return;
@@ -770,7 +746,7 @@ void setManualTimezone(String tz_name) {
 
         Serial.print("Не удалось установить пояс '");
         Serial.print(tz_name);
-        Serial.println("'. Можно задать смещение вручную: 'tz offset N' или выбрать пресет: 'tz set <N>'");
+        Serial.println("'. Можно задать смещение вручную: 'tz offset N' или выбрать из списка: 'tz list'");
     }
 }
 
@@ -786,16 +762,17 @@ void setManualTimezoneOffset(int offset) {
 }
 
 void enableAutoTimezone() {
-    config.time_config.auto_timezone = true;
-    initTimezone(); // попытаться загрузить данные пояса
+    config.time_config.automatic_localtime = true;
+    initTimezone(); // попытаться загрузить ezTime
     saveConfig();
-    Serial.println("Автоопределение часового пояса включено");
+    Serial.println("Режим ezTime (online) включен");
 }
 
 void disableAutoTimezone() {
-    config.time_config.auto_timezone = false;
+    config.time_config.automatic_localtime = false;
+    initTimezone(); // переключиться на локальную таблицу
     saveConfig();
-    Serial.println("Автоопределение часового пояса отключено (manual mode)");
+    Serial.println("Режим локальной таблицы (offline) включен");
 }
 
 void printMappingMenuCommands() {

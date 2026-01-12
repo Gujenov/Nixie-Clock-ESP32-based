@@ -37,28 +37,33 @@ struct AlarmSettings {
 
 
 struct TimeConfig {
-    // Флаги управления
-    bool manual_time_set;        // Время установлено вручную
-    bool auto_timezone;          // Автоопределение пояса (true = разрешить менять)
-    bool auto_sync_enabled;      // Автосинхронизация разрешена
-    bool auto_dst;               // Автоопределение DST (true = разрешить менять)
-    bool dcf77_enabled;          // Включить/выключить DCF77 приемник
+    // === ОСНОВНАЯ НАСТРОЙКА ===
+    char timezone_name[32];           // "Europe/Moscow" - ОБЯЗАТЕЛЬНО! Локация часового пояса
+    bool automatic_localtime;         // true = ezTime (online), false = локальная таблица (offline)
     
-    // Настройки
-    char timezone_name[32];      // "Europe/Moscow", "Asia/Vladivostok"
-    int8_t manual_offset;        // Ручное смещение (часы)
-    bool dst_enabled;            // Включить DST (если auto_dst = false)
+    // === ВЫЧИСЛЯЕМЫЕ ЗНАЧЕНИЯ (автоматически обновляются) ===
+    int8_t current_offset;            // Текущее смещение UTC в часах (напр. +3, +4)
+    bool current_dst_active;          // Текущий статус DST (true/false)
     
-    // Флаги состояния
-    bool location_detected;      // Пояс определён автоматически
-    char detected_tz[32];        // Определённый пояс (для отладки)
-    bool dst_active;             // Текущий статус DST (только для чтения)
-
-    // Синхронизация
-    uint8_t sync_interval_hours; // Интервал синхронизации (часы)
-    uint32_t last_ntp_sync;      // Время последней NTP синхронизации (UNIX time)
-    uint32_t last_dcf77_sync;    // Время последней DCF77 синхронизации
-    uint8_t sync_failures;       // Счётчик неудачных синхронизаций
+    // === СИНХРОНИЗАЦИЯ ===
+    bool auto_sync_enabled;           // Автосинхронизация с NTP разрешена
+    uint8_t sync_interval_hours;      // Интервал синхронизации (часы)
+    uint32_t last_ntp_sync;           // Время последней NTP синхронизации (UNIX time)
+    uint32_t last_dcf77_sync;         // Время последней DCF77 синхронизации
+    uint8_t sync_failures;            // Счётчик неудачных синхронизаций
+    
+    // === ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ ===
+    bool manual_time_set;             // Время было установлено вручную
+    bool dcf77_enabled;               // Включить/выключить DCF77 приёмник
+    
+    // === УСТАРЕВШИЕ ПОЛЯ (для совместимости, будут удалены) ===
+    int8_t manual_offset;             // Deprecated: использовать timezone_name + preset
+    bool dst_enabled;                 // Deprecated: DST определяется автоматически
+    bool dst_active;                  // Deprecated: использовать current_dst_active
+    bool auto_timezone;               // Deprecated: переименовано в automatic_localtime
+    bool auto_dst;                    // Deprecated: DST теперь всегда автоматический
+    bool location_detected;           // Deprecated: больше не используется
+    char detected_tz[32];             // Deprecated: больше не используется
 };
 
 struct Config {

@@ -53,27 +53,32 @@ void setDefaultConfig() {
     strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
     
      // Timezone settings
-    config.time_config.manual_time_set = false;
-    config.time_config.auto_timezone = true;      // Включаем автоопределение
-    config.time_config.auto_sync_enabled = true;
-    config.time_config.auto_dst = false;           // Авто DST выключено — DST будет устанавливаться вручную
-    config.time_config.dcf77_enabled = true;      // DCF77 включён
+    strcpy(config.time_config.timezone_name, DEFAULT_TIMEZONE_NAME);  // "Europe/Moscow"
+    config.time_config.automatic_localtime = true;     // По умолчанию используем ezTime
     
-    // Имя пояса по умолчанию
-    strcpy(config.time_config.timezone_name, DEFAULT_TIMEZONE_NAME);
-    config.time_config.manual_offset = DEFAULT_TIMEZONE_OFFSET;
-    config.time_config.dst_enabled = false;       // Управляется библиотекой!
+    // Вычисляемые значения (будут обновлены автоматически)
+    config.time_config.current_offset = DEFAULT_TIMEZONE_OFFSET;  // +3 для Москвы
+    config.time_config.current_dst_active = false;
     
-    // Состояние
-    config.time_config.location_detected = false;
-    config.time_config.detected_tz[0] = '\0';
-    config.time_config.dst_active = false;
-       
     // Синхронизация
+    config.time_config.auto_sync_enabled = true;
     config.time_config.sync_interval_hours = 12;  // Синхронизировать каждые 12 часов
     config.time_config.last_ntp_sync = 0;         // Никогда не синхронизировались
     config.time_config.last_dcf77_sync = 0;
     config.time_config.sync_failures = 0;
+    
+    // Дополнительные настройки
+    config.time_config.manual_time_set = false;
+    config.time_config.dcf77_enabled = true;      // DCF77 включён
+    
+    // Устаревшие поля (для совместимости)
+    config.time_config.manual_offset = DEFAULT_TIMEZONE_OFFSET;
+    config.time_config.dst_enabled = false;
+    config.time_config.dst_active = false;
+    config.time_config.auto_timezone = true;
+    config.time_config.auto_dst = false;
+    config.time_config.location_detected = false;
+    config.time_config.detected_tz[0] = '\0';
     
     // Системные
     strlcpy(config.serial_number, "NC111115861", sizeof(config.serial_number));
