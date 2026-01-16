@@ -45,3 +45,7 @@ bool syncTime();                               // Обновленная (раб
 bool printTime();                              // Обновленная версия
 bool setManualTime(const String &timeStr);     // Обновленная (работает с UTC)
 bool setManualDate(const String &dateStr);     // Обновленная (работает с UTC)
+
+// Новые функции для установки локального времени/даты
+bool setManualLocalTime(const String &timeStr);  // Установка локального времени (конвертация в UTC)
+bool setManualLocalDate(const String &dateStr);  // Установка локальной даты (конвертация в UTC)

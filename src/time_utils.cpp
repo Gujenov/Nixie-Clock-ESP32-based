@@ -1,6 +1,7 @@
 #include "time_utils.h"
 #include "config.h"
 #include "hardware.h"
+#include "timezone_manager.h"
 
 extern WiFiUDP ntpUDP;         // Определен где-то еще (возможно в .ino)
 extern NTPClient *timeClient;  // Определен в config.cpp
@@ -223,6 +224,7 @@ bool syncTime() {
     
     if (WiFi.status() != WL_CONNECTED) {
         Serial.print("\n[NTP] Ошибка: не удалось подключиться к WiFi");
+        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
         digitalWrite(LED_PIN, LOW);
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
@@ -231,6 +233,7 @@ bool syncTime() {
     
     Serial.printf("\n[WiFi] Подключено к %s", config.wifi_ssid);
     Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
+    Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
     
     // 3. Пробуем синхронизироваться с NTP
     try {
@@ -273,6 +276,20 @@ bool syncTime() {
                     Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
                                  config.time_config.current_offset,
                                  config.time_config.current_dst_active ? "ON" : "OFF");
+                    
+                    // Сверяем с локальной таблицей
+                    const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
+                    if (preset) {
+                        bool local_dst = calculateDSTStatus(utcTime, preset);
+                        int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
+                        
+                        if (config.time_config.current_offset == local_offset && 
+                            config.time_config.current_dst_active == local_dst) {
+                            Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
+                        } else {
+                            Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление прошивки");
+                        }
+                    }
                 } else {
                     Serial.print("\n[TZ] Включено ручное определение локального времени.");
                     Serial.printf("\n[TZ] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
@@ -313,6 +330,7 @@ bool syncTime() {
     if (!success) {
         blinkError(11);
         Serial.print("\n[NTP] Не удалось синхронизировать время!");
+        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
     } else {
         Serial.println("\n[NTP] Синхронизация успешна!");
     }
@@ -403,12 +421,12 @@ bool setManualTime(const String &timeStr) {
     int hours, minutes, seconds;
     
     if (sscanf(timeStr.c_str(), "%d:%d:%d", &hours, &minutes, &seconds) != 3) {
-        Serial.print("\nОшибка формата времени. Используйте HH:MM:SS");
+        Serial.print("\nОшибка формата времени. Используйте HH:MM:SS\n");
         return false;
     }
 
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) {
-        Serial.print("\nОшибка: некорректное время (00:00:00 - 23:59:59)");
+        Serial.print("\nОшибка: некорректное время (00:00:00 - 23:59:59)\n");
         return false;
     }
 
@@ -423,7 +441,7 @@ bool setManualTime(const String &timeStr) {
         utc_time.tm_year = 2025 - 1900;  // 2025 год
         utc_time.tm_mon = 7 - 1;         // Июль
         utc_time.tm_mday = 6;            // 6-е число
-        Serial.print("\n⚠️  Использую дату по умолчанию: 06.07.2025");
+        Serial.print("\n⚠️  Использую дату по умолчанию: 06.07.2025\n");
     }
     
     // 3. Меняем только время
@@ -435,14 +453,14 @@ bool setManualTime(const String &timeStr) {
     time_t newTime_utc = mktime(&utc_time);
     
     if (newTime_utc == -1) {
-        Serial.print("\nОшибка конвертации времени");
+        Serial.print("\nОшибка конвертации времени\n");
         return false;
     }
     
     // 5. Устанавливаем во все источники через единую функцию
     setTimeToAllSources(newTime_utc);
     
-    Serial.printf("\n✅ Время установлено: %02d:%02d:%02d", hours, minutes, seconds);
+    Serial.printf("\n✅ Время установлено: %02d:%02d:%02d\n", hours, minutes, seconds);
     //printTime();
     return true;
 }
@@ -473,7 +491,7 @@ bool setManualDate(const String &dateStr) {
     int day, month, year;
     
     if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
-        Serial.print("\nОшибка формата даты. Используйте DD.MM.YYYY");
+        Serial.print("\nОшибка формата даты. Используйте DD.MM.YYYY\n");
         return false;
     }
 
@@ -483,7 +501,7 @@ bool setManualDate(const String &dateStr) {
         
         // Полезное сообщение для 29 февраля
         if (month == 2 && day == 29) {
-            Serial.printf("\nГод %d не высокосный", year);
+            Serial.printf("\nГод %d не высокосный\n", year);
         }
         return false;
     }
@@ -508,8 +526,116 @@ bool setManualDate(const String &dateStr) {
     // 4. Устанавливаем во все источники
     setTimeToAllSources(newTime_utc);
     
-    Serial.printf("\n✅ Дата установлена: %02d.%02d.%04d", day, month, year);
+    Serial.printf("\n✅ Дата установлена: %02d.%02d.%04d\n", day, month, year);
     //printTime();
+    return true;
+}
+
+// Установка времени по локальной временной зоне (конвертируем в UTC)
+bool setManualLocalTime(const String &timeStr) {
+    int hours, minutes, seconds;
+    
+    if (sscanf(timeStr.c_str(), "%d:%d:%d", &hours, &minutes, &seconds) != 3) {
+        Serial.print("\nОшибка формата времени. Используйте HH:MM:SS\n");
+        return false;
+    }
+
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) {
+        Serial.print("\nОшибка: некорректное время (00:00:00 - 23:59:59)\n");
+        return false;
+    }
+
+    // 1. Получаем текущую дату в UTC
+    time_t now_utc;
+    time(&now_utc);
+    
+    // 2. Конвертируем в локальное время
+    time_t now_local = utcToLocal(now_utc);
+    struct tm local_time;
+    gmtime_r(&now_local, &local_time);
+    
+    // 3. Если дата некорректна (< 2025), устанавливаем дефолтную (06.07.2025)
+    if (local_time.tm_year + 1900 < 2025) {
+        local_time.tm_year = 2025 - 1900;  // 2025 год
+        local_time.tm_mon = 7 - 1;         // Июль
+        local_time.tm_mday = 6;            // 6-е число
+        Serial.print("\n⚠️  Использую дату по умолчанию: 06.07.2025\n");
+    }
+    
+    // 4. Меняем только время (локальное)
+    local_time.tm_hour = hours;
+    local_time.tm_min = minutes;
+    local_time.tm_sec = seconds;
+    
+    // 5. Создаём time_t из локального времени
+    time_t newTime_local = mktime(&local_time);
+    
+    if (newTime_local == -1) {
+        Serial.print("\nОшибка конвертации времени\n");
+        return false;
+    }
+    
+    // 6. Конвертируем локальное время в UTC
+    time_t newTime_utc = localToUtc(newTime_local);
+    
+    // 7. Устанавливаем UTC время во все источники
+    setTimeToAllSources(newTime_utc);
+    
+    Serial.printf("\n✅ Локальное время установлено: %02d:%02d:%02d\n", hours, minutes, seconds);
+    Serial.printf("   (UTC время: ");
+    struct tm utc_tm;
+    gmtime_r(&newTime_utc, &utc_tm);
+    Serial.printf("%02d:%02d:%02d)\n", utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
+    return true;
+}
+
+// Установка даты по локальной временной зоне (конвертируем в UTC)
+bool setManualLocalDate(const String &dateStr) {
+    int day, month, year;
+    
+    if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
+        Serial.print("\nОшибка формата даты. Используйте DD.MM.YYYY\n");
+        return false;
+    }
+
+    // Проверка даты
+    if (!isValidDate(day, month, year)) {
+        Serial.printf("\nОшибка: некорректная дата %02d.%02d.%04d", day, month, year);
+        
+        if (month == 2 && day == 29) {
+            Serial.printf("\nГод %d не высокосный\n", year);
+        }
+        return false;
+    }
+
+    // 1. Получаем текущее время в UTC
+    time_t now_utc;
+    time(&now_utc);
+    
+    // 2. Конвертируем в локальное время
+    time_t now_local = utcToLocal(now_utc);
+    struct tm local_time;
+    gmtime_r(&now_local, &local_time);
+    
+    // 3. Меняем дату (сохраняем текущее время в локальной зоне)
+    local_time.tm_mday = day;
+    local_time.tm_mon = month - 1;  // Месяцы 0-11
+    local_time.tm_year = year - 1900;
+    
+    // 4. Создаём time_t из локального времени
+    time_t newTime_local = mktime(&local_time);
+    
+    // 5. Конвертируем локальное время в UTC
+    time_t newTime_utc = localToUtc(newTime_local);
+    
+    // 6. Устанавливаем UTC время во все источники
+    setTimeToAllSources(newTime_utc);
+    
+    Serial.printf("\n✅ Локальная дата установлена: %02d.%02d.%04d\n", day, month, year);
+    struct tm utc_tm;
+    gmtime_r(&newTime_utc, &utc_tm);
+    Serial.printf("   (UTC дата: %02d.%02d.%04d)\n", 
+                  utc_tm.tm_mday, utc_tm.tm_mon + 1, utc_tm.tm_year + 1900);
     return true;
 }
 

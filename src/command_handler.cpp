@@ -41,13 +41,23 @@ void handleCommand(String command) {
     else if (command.equals("sync")) {
         syncTime();
     }
-    else if (command.startsWith("set T ")) {
-        String timeStr = command.substring(6);
+    // Команды установки UTC времени и даты
+    else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {
+        String timeStr = command.startsWith("set UTC T ") ? command.substring(10) : command.substring(4);
         setManualTime(timeStr);
     }
-    else if (command.startsWith("set D ")) {
-        String dateStr = command.substring(6);
+    else if (command.startsWith("set UTC D ") || command.startsWith("SUD ")) {
+        String dateStr = command.startsWith("set UTC D ") ? command.substring(10) : command.substring(4);
         setManualDate(dateStr);
+    }
+    // Команды установки локального времени и даты
+    else if (command.startsWith("set local T ") || command.startsWith("SLT ")) {
+        String timeStr = command.startsWith("set local T ") ? command.substring(12) : command.substring(4);
+        setManualLocalTime(timeStr);
+    }
+    else if (command.startsWith("set local D ") || command.startsWith("SLD ")) {
+        String dateStr = command.startsWith("set local D ") ? command.substring(12) : command.substring(4);
+        setManualLocalDate(dateStr);
     }
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");

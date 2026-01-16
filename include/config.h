@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260109"
+#define FIRMWARE_VERSION "1.A0.3.260116"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -44,6 +44,18 @@ struct TimeConfig {
     // === ВЫЧИСЛЯЕМЫЕ ЗНАЧЕНИЯ (автоматически обновляются) ===
     int8_t current_offset;            // Текущее смещение UTC в часах (напр. +3, +4)
     bool current_dst_active;          // Текущий статус DST (true/false)
+    
+    // === РУЧНАЯ НАСТРОЙКА TIMEZONE (для option 100) ===
+    int8_t manual_std_offset;         // Стандартное смещение для ручной зоны
+    int8_t manual_dst_offset;         // DST смещение для ручной зоны
+    uint8_t manual_dst_start_month;   // DST start: месяц (0 = DST отключен)
+    uint8_t manual_dst_start_week;    // DST start: неделя
+    uint8_t manual_dst_start_dow;     // DST start: день недели
+    uint8_t manual_dst_start_hour;    // DST start: час
+    uint8_t manual_dst_end_month;     // DST end: месяц
+    uint8_t manual_dst_end_week;      // DST end: неделя
+    uint8_t manual_dst_end_dow;       // DST end: день недели
+    uint8_t manual_dst_end_hour;      // DST end: час
     
     // === СИНХРОНИЗАЦИЯ ===
     bool auto_sync_enabled;           // Автосинхронизация с NTP разрешена

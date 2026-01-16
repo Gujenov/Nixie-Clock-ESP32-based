@@ -47,3 +47,5 @@ time_t calculateDSTTransition(int year, uint8_t month, uint8_t week, uint8_t dow
 // Отладка
 void printTimezoneInfo();
 void listAvailableTimezones();
+void compareDSTRules();  // Сравнение правил ezTime с локальной таблицей
+void setupManualOffset();  // Ручная настройка смещения

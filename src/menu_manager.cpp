@@ -98,16 +98,19 @@ void printTimeMenu() {
     printTimezoneInfo();
     
     Serial.println("\nУстановки времени:");
-    Serial.println("  time, t           - Текущее время (UTC и локальное)");
-    Serial.println("  sync              - Синхронизировать с NTP");
-    Serial.println("  set T HH:MM:SS    - Установить локальное время");
-    Serial.println("  set D DD.MM.YYYY  - Установить локальную дату");
+    Serial.println("  time, t                  - Текущее время (UTC и локальное)");
+    Serial.println("  sync                     - Синхронизировать с NTP");
+    Serial.println("  set UTC T, SUT HH:MM:SS  - Установить UTC время");
+    Serial.println("  set UTC D, SUD DD.MM.YY  - Установить UTC дату");
+    Serial.println("  set local T, SLT HH:MM:SS - Установить локальное время");
+    Serial.println("  set local D, SLD DD.MM.YY - Установить локальную дату");
     
     Serial.println("\nУстановки поясов:");
     //Serial.println("  tz                - Информация о текущем поясе и настройке (ручной/авто)");
     Serial.println("  tz list, tzl      - Выбор доступных поясов");
     Serial.println("  tz auto, tza      - Автоматическое определение пояса");
     Serial.println("  tz manual, tzm    - Отключить автоопределение");
+    Serial.println("  tz check, tzc     - Сравнить правила DST (ezTime vs таблица)");
 
     printMappingMenuCommands();  //Управление меню
 }
@@ -195,13 +198,23 @@ void handleTimeMenu(String command) {
     else if (command.equals("sync")) {
         syncTime();
     }
-    else if (command.startsWith("set T ")) {
-        String timeStr = command.substring(6);
+    // Команды установки UTC времени и даты
+    else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {
+        String timeStr = command.startsWith("set UTC T ") ? command.substring(10) : command.substring(4);
         setManualTime(timeStr);
     }
-    else if (command.startsWith("set D ")) {
-        String dateStr = command.substring(6);
+    else if (command.startsWith("set UTC D ") || command.startsWith("SUD ")) {
+        String dateStr = command.startsWith("set UTC D ") ? command.substring(10) : command.substring(4);
         setManualDate(dateStr);
+    }
+    // Команды установки локального времени и даты
+    else if (command.startsWith("set local T ") || command.startsWith("SLT ")) {
+        String timeStr = command.startsWith("set local T ") ? command.substring(12) : command.substring(4);
+        setManualLocalTime(timeStr);
+    }
+    else if (command.startsWith("set local D ") || command.startsWith("SLD ")) {
+        String dateStr = command.startsWith("set local D ") ? command.substring(12) : command.substring(4);
+        setManualLocalDate(dateStr);
     }
     else {
         // If we're in an interactive timezone list mode, handle numeric or direct selections first
@@ -217,6 +230,13 @@ void handleTimeMenu(String command) {
             
             if (isNum && command.length() > 0) {
                 int num = command.toInt();
+                
+                // Специальная обработка для номера 100 - ручная настройка
+                if (num == 100) {
+                    setupManualOffset();
+                    return;
+                }
+                
                 uint8_t count = getPresetsCount();
                 
                 if (num >= 1 && num <= count) {
@@ -281,13 +301,18 @@ void handleTimeMenu(String command) {
             tz_list_state = 1;  // Активируем режим выбора зоны
             return;
         }
-        if (cmdLower.equals("tza")) {
+        if (cmdLower.equals("tz auto") || cmdLower.equals("tza")) {
             enableAutoTimezone();
             tz_list_state = 0;
             return;
         }
-        if (cmdLower.equals("tzm")) {
+        if (cmdLower.equals("tz manual") || cmdLower.equals("tzm")) {
             disableAutoTimezone();
+            tz_list_state = 0;
+            return;
+        }
+        if (cmdLower.equals("tz check") || cmdLower.equals("tzc")) {
+            compareDSTRules();
             tz_list_state = 0;
             return;
         }
@@ -685,9 +710,15 @@ void setManualTimezone(String tz_name) {
 
     if (isNumber) {
         int idx = tz_name.toInt();
+        
+        // Специальная обработка для номера 100 - ручная настройка
+        if (idx == 100) {
+            setupManualOffset();
+            return;
+        }
 
         if (idx < 1 || idx > tz_preset_count) {
-            Serial.println("Неверный номер пресета");
+            Serial.println("Неверный номер. Введите число от 1 до 42 или 100");
             return;
         }
         const TZPreset &p = tz_presets[idx-1];
@@ -762,17 +793,24 @@ void setManualTimezoneOffset(int offset) {
 }
 
 void enableAutoTimezone() {
+    // Запрещаем переключение в автоматический режим для Manual preset
+    if (strcmp(config.time_config.timezone_name, "MANUAL") == 0) {
+        Serial.println("\n✖ Ошибка: Невозможно включить автоматический режим для ручной настройки.");
+        Serial.println("Используйте команду 'tz list' для выбора часового пояса из списка.");
+        return;
+    }
+    
     config.time_config.automatic_localtime = true;
     initTimezone(); // попытаться загрузить ezTime
     saveConfig();
-    Serial.println("Режим ezTime (online) включен");
+    Serial.println("\nРежим ezTime (online) включен");
 }
 
 void disableAutoTimezone() {
     config.time_config.automatic_localtime = false;
     initTimezone(); // переключиться на локальную таблицу
     saveConfig();
-    Serial.println("Режим локальной таблицы (offline) включен");
+    Serial.println("\nРежим локальной таблицы (offline) включен");
 }
 
 void printMappingMenuCommands() {
