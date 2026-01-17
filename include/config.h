@@ -82,6 +82,8 @@ struct Config {
     // Настройки подключения
     char wifi_ssid[32];
     char wifi_pass[32];
+    char wifi_ssid_2[32];  // Вторая WiFi сеть (резервная)
+    char wifi_pass_2[32];  // Пароль второй сети
     char ntp_server[NTP_SERVER_SIZE];
     
     // Настройки времени

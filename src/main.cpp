@@ -18,9 +18,7 @@ void setup() {
     checkTimeSource(); 
     printDS3231Temperature();
     
-    if(config.time_config.auto_sync_enabled && strlen(config.wifi_ssid) > 0) {
-        syncTime();
-    }
+    syncTime();
     
     Serial.print("\n\n=== Система готова ===");
     Serial.println("\n\nhelp,? - Перечень доступных команд");

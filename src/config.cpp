@@ -79,16 +79,18 @@ void setDefaultConfig() {
     memset(&config, 0, sizeof(config));
     
     // WiFi
-    strlcpy(config.wifi_ssid, "Hogwarts-2.4", sizeof(config.wifi_ssid));
+    strlcpy(config.wifi_ssid, "Hogwarts-2.4", sizeof(config.wifi_ssid));  // Первая сеть
     strlcpy(config.wifi_pass, "Alohomora!", sizeof(config.wifi_pass));
+    strlcpy(config.wifi_ssid_2, "Hogwarts", sizeof(config.wifi_ssid_2));  // Вторая сеть
+    strlcpy(config.wifi_pass_2, "Alohomora!", sizeof(config.wifi_pass_2));
     strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
     
      // Timezone settings
-    strcpy(config.time_config.timezone_name, DEFAULT_TIMEZONE_NAME);  // "Europe/Moscow"
+    strcpy(config.time_config.timezone_name, DEFAULT_TIMEZONE_NAME);  // "Europe/Warsaw"
     config.time_config.automatic_localtime = true;     // По умолчанию используем ezTime
     
     // Вычисляемые значения (будут обновлены автоматически)
-    config.time_config.current_offset = DEFAULT_TIMEZONE_OFFSET;  // +3 для Москвы
+    config.time_config.current_offset = DEFAULT_TIMEZONE_OFFSET;  // +1 для Варшавы
     config.time_config.current_dst_active = false;
     
     // Синхронизация

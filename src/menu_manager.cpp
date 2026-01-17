@@ -17,6 +17,8 @@ void setManualTimezone(String tz_name);
 void setManualTimezoneOffset(int offset);
 void enableAutoTimezone();
 void disableAutoTimezone();
+void enableAutoSync();
+void disableAutoSync();
 
 // ======================= УПРАВЛЕНИЕ РЕЖИМОМ МЕНЮ =======================
 
@@ -104,6 +106,11 @@ void printTimeMenu() {
     Serial.println("  set UTC D, SUD DD.MM.YY  - Установить UTC дату");
     Serial.println("  set local T, SLT HH:MM:SS - Установить локальное время");
     Serial.println("  set local D, SLD DD.MM.YY - Установить локальную дату");
+    
+    Serial.println("\nАвтоматическая синхронизация:");
+    Serial.printf("  Статус: %s\n", config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
+    Serial.println("  auto sync en, ASE - Включить автосинхронизацию");
+    Serial.println("  auto sync dis, ASD - Отключить автосинхронизацию");
     
     Serial.println("\nУстановки поясов:");
     //Serial.println("  tz                - Информация о текущем поясе и настройке (ручной/авто)");
@@ -316,6 +323,14 @@ void handleTimeMenu(String command) {
             tz_list_state = 0;
             return;
         }
+        if (cmdLower.equals("auto sync en") || cmdLower.equals("ase")) {
+            enableAutoSync();
+            return;
+        }
+        if (cmdLower.equals("auto sync dis") || cmdLower.equals("asd")) {
+            disableAutoSync();
+            return;
+        }
 
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
@@ -409,7 +424,8 @@ void printWifiMenu() {
     Serial.println("\n=== WI-FI И NTP ===");
 
     Serial.println("\nТекущие параметры:");
-    Serial.printf("  WiFi SSID: %s\n", config.wifi_ssid);
+    Serial.printf("  WiFi SSID (сеть 1): %s\n", strlen(config.wifi_ssid) > 0 ? config.wifi_ssid : "(не установлено)");
+    Serial.printf("  WiFi SSID (сеть 2, резервная): %s\n", strlen(config.wifi_ssid_2) > 0 ? config.wifi_ssid_2 : "(не установлено)");
     Serial.printf("  NTP сервер: %s\n", config.ntp_server);
     if (config.time_config.last_ntp_sync) {
         time_t t = (time_t)config.time_config.last_ntp_sync;
@@ -422,8 +438,9 @@ void printWifiMenu() {
 
     Serial.println("\nКоманды:");
     Serial.println("  wifi scan     - Сканировать доступные сети");
-    Serial.println("  wifi [SSID] [PASSWORD] - Ввести данные для подключения к WiFi");
-    Serial.println("  set ntp <SERVER> - Установить NTP сервер");
+    Serial.println("  wifi [SSID] [PASSWORD] - Данные основной сети WIFI (сеть 1)");
+    Serial.println("  wifi2 [SSID] [PASSWORD] - Данные резервной сети WIFI (сеть 2)");
+    Serial.println("  set ntp <SERVER> - Задать NTP сервер");
 
     printMappingMenuCommands();  //Управление меню
 }
@@ -459,7 +476,27 @@ void handleWifiMenu(String command) {
             strncpy(config.wifi_pass, password.c_str(), sizeof(config.wifi_pass) - 1);
             config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
             config.wifi_pass[sizeof(config.wifi_pass) - 1] = '\0';
-            Serial.printf("Данные для подключения к WiFi установлены: SSID='%s'\n", config.wifi_ssid);
+            Serial.printf("Данные для подключения к WiFi (сеть 1) установлены: SSID='%s'\n", config.wifi_ssid);
+            saveConfig();
+            Serial.println("WiFi настройки сохранены во flash");
+        }
+    }
+    else if (command.startsWith("wifi2 ")) {
+        String args = command.substring(6);
+        int spaceIdx = args.indexOf(' ');
+        if (spaceIdx == -1) {
+            Serial.println("Нужно указать SSID и пароль");
+        }
+        else {
+            String ssid = args.substring(0, spaceIdx);
+            String password = args.substring(spaceIdx + 1);
+            ssid.trim();
+            password.trim();
+            strncpy(config.wifi_ssid_2, ssid.c_str(), sizeof(config.wifi_ssid_2) - 1);
+            strncpy(config.wifi_pass_2, password.c_str(), sizeof(config.wifi_pass_2) - 1);
+            config.wifi_ssid_2[sizeof(config.wifi_ssid_2) - 1] = '\0';
+            config.wifi_pass_2[sizeof(config.wifi_pass_2) - 1] = '\0';
+            Serial.printf("Данные для подключения к WiFi (сеть 2, резервная) установлены: SSID='%s'\n", config.wifi_ssid_2);
             saveConfig();
             Serial.println("WiFi настройки сохранены во flash");
         }
@@ -811,6 +848,20 @@ void disableAutoTimezone() {
     initTimezone(); // переключиться на локальную таблицу
     saveConfig();
     Serial.println("\nРежим локальной таблицы (offline) включен");
+}
+
+void enableAutoSync() {
+    config.time_config.auto_sync_enabled = true;
+    saveConfig();
+    Serial.println("\nАвтоматическая синхронизация времени ВКЛЮЧЕНА");
+    Serial.printf("Интервал синхронизации: %d часов\n", config.time_config.sync_interval_hours);
+}
+
+void disableAutoSync() {
+    config.time_config.auto_sync_enabled = false;
+    saveConfig();
+    Serial.println("\nАвтоматическая синхронизация времени ОТКЛЮЧЕНА");
+    Serial.println("Время можно установить вручную или синхронизировать командой 'sync'");
 }
 
 void printMappingMenuCommands() {

@@ -197,6 +197,20 @@ void setTimeToAllSources(time_t utcTime) {
 }
 
 bool syncTime() {
+    // Проверяем, разрешена ли синхронизация
+    if (!config.time_config.auto_sync_enabled) {
+        Serial.print("\n\n[SYNC] Автоматическая синхронизация отключена");
+        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+        return false;
+    }
+    
+    // Проверяем, настроен ли WiFi
+    if (strlen(config.wifi_ssid) == 0) {
+        Serial.print("\n\n[SYNC] WiFi не настроен, автоматическая синхронизация невозможна");
+        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+        return false;
+    }
+    
     // Проверяем, инициализирован ли timeClient
     if (!timeClient) {
         Serial.print("\n\n[NTP] Ошибка: timeClient не инициализирован");
@@ -207,35 +221,75 @@ bool syncTime() {
     Serial.print("\n\n[NTP] Попытка синхронизации...");
     
     bool success = false;
+    bool wifi_connected = false;
+    int network_number = 0;  // 1 или 2
     
     // 1. Включаем WiFi
     WiFi.mode(WIFI_STA);
-    WiFi.begin(config.wifi_ssid, config.wifi_pass);
     
-    // 2. Ждем подключения с таймаутом
-    int attempts = 0;
-    Serial.print("\n[WiFi] Подключение");
-    while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-        delay(300);
-        Serial.print(".");
-        attempts++;
+    // 2. Пробуем подключиться к первой сети
+    if (strlen(config.wifi_ssid) > 0) {
+        Serial.print("\n[WiFi] Попытка подключения к сети 1");
+        WiFi.begin(config.wifi_ssid, config.wifi_pass);
+        
+        int attempts = 0;
+        Serial.print("\n[WiFi] Подключение");
+        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+            delay(300);
+            Serial.print(".");
+            attempts++;
+        }
+        Serial.print("\n");
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            wifi_connected = true;
+            network_number = 1;
+            Serial.printf("\n[WiFi] Подключено к %s (сеть 1)", config.wifi_ssid);
+            Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
+            Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
+        } else {
+            Serial.print("\n[WiFi] Не удалось подключиться к сети 1");
+        }
     }
-    Serial.print("\n");
     
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.print("\n[NTP] Ошибка: не удалось подключиться к WiFi");
-        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+    // 3. Если первая сеть не подключилась, пробуем вторую
+    if (!wifi_connected && strlen(config.wifi_ssid_2) > 0) {
+        Serial.print("\n[WiFi] Попытка подключения к сети 2");
+        WiFi.disconnect();
+        delay(100);
+        WiFi.begin(config.wifi_ssid_2, config.wifi_pass_2);
+        
+        int attempts = 0;
+        Serial.print("\n[WiFi] Подключение");
+        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+            delay(300);
+            Serial.print(".");
+            attempts++;
+        }
+        Serial.print("\n");
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            wifi_connected = true;
+            network_number = 2;
+            Serial.printf("\n[WiFi] Подключено к %s (сеть 2)", config.wifi_ssid_2);
+            Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
+            Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
+        } else {
+            Serial.print("\n[WiFi] Не удалось подключиться к сети 2");
+        }
+    }
+    
+    // 4. Если не удалось подключиться ни к одной сети
+    if (!wifi_connected) {
+        Serial.print("\n[NTP] Ошибка: не удалось подключиться ни к одной WiFi сети");
+        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время\n");
         digitalWrite(LED_PIN, LOW);
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
         return false;
     }
     
-    Serial.printf("\n[WiFi] Подключено к %s", config.wifi_ssid);
-    Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
-    Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
-    
-    // 3. Пробуем синхронизироваться с NTP
+    // 5. Пробуем синхронизироваться с NTP
     try {
         timeClient->begin();
         timeClient->setTimeOffset(0); // Запрашиваем UTC
@@ -313,7 +367,7 @@ bool syncTime() {
                 Serial.print("\n[NTP] Ошибка: получено некорректное время");
             }
         } else {
-                Serial.print("\n[NTP] Ошибка: forceUpdate() не удался");
+            Serial.print("\n[NTP] Ошибка: forceUpdate() не удался");
         }
         
         timeClient->end();
@@ -321,7 +375,113 @@ bool syncTime() {
         Serial.print("\n[NTP] Исключение при синхронизации!");
     }
     
-    // 4. Отключаем WiFi
+    // 6. Если не удалось через первую сеть и есть вторая - пробуем вторую
+    if (!success && network_number == 1 && strlen(config.wifi_ssid_2) > 0) {
+        Serial.print("\n[NTP] Попытка синхронизации через сеть 2...");
+        
+        // Отключаемся от первой сети
+        WiFi.disconnect();
+        delay(100);
+        
+        // Подключаемся ко второй сети
+        WiFi.begin(config.wifi_ssid_2, config.wifi_pass_2);
+        
+        int attempts = 0;
+        Serial.print("\n[WiFi] Подключение");
+        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+            delay(300);
+            Serial.print(".");
+            attempts++;
+        }
+        Serial.print("\n");
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("\n[WiFi] Подключено к %s (сеть 2)", config.wifi_ssid_2);
+            Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
+            Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
+            
+            // Пробуем синхронизироваться с NTP через вторую сеть
+            try {
+                timeClient->begin();
+                timeClient->setTimeOffset(0);
+                
+                if (timeClient->forceUpdate()) {
+                    time_t utcTime = timeClient->getEpochTime();
+                    
+                    if (utcTime > 1751792400) {
+                        // Выводим полученное UTC время
+                        struct tm *tm_utc = gmtime(&utcTime);
+                        Serial.printf("\n[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d", 
+                                   tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
+                                   tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
+
+                        // Устанавливаем UTC время в систему
+                        struct timeval tv = { utcTime, 0 };
+                        settimeofday(&tv, NULL);
+                        Serial.print("\n[NTP] -> [RTC] Время записано во внутренний RTC");
+                        
+                        // Записываем в DS3231 ТОЖЕ UTC
+                        if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+                            DateTime rtcTime(utcTime);
+                            rtc->adjust(rtcTime);
+                            Serial.print("\n[NTP] -> [DS3231] Время записано в аппаратные часы");
+                        }
+                        
+                        // Показываем информацию о режиме работы с часовыми поясами
+                        if (config.time_config.automatic_localtime) {
+                            Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
+                            Serial.printf("\n[TZ] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+                            
+                            time_t local_time = utcToLocal(utcTime);
+                            Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
+                                         config.time_config.current_offset,
+                                         config.time_config.current_dst_active ? "ON" : "OFF");
+                            
+                            const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
+                            if (preset) {
+                                bool local_dst = calculateDSTStatus(utcTime, preset);
+                                int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
+                                
+                                if (config.time_config.current_offset == local_offset && 
+                                    config.time_config.current_dst_active == local_dst) {
+                                    Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
+                                } else {
+                                    Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление прошивки");
+                                }
+                            }
+                        } else {
+                            Serial.print("\n[TZ] Включено ручное определение локального времени.");
+                            Serial.printf("\n[TZ] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
+                            
+                            time_t local_time = utcToLocal(utcTime);
+                            Serial.printf("\n[TZ] Данные из таблицы: UTC%+d, DST: %s", 
+                                         config.time_config.current_offset,
+                                         config.time_config.current_dst_active ? "ON" : "OFF");
+                        }
+                        
+                        // Обновляем время последней синхронизации
+                        config.time_config.last_ntp_sync = utcTime;
+                        saveConfig();
+                        
+                        success = true;
+                        digitalWrite(LED_PIN, LOW);
+                    } else {
+                        Serial.print("\n[NTP] Ошибка: получено некорректное время");
+                    }
+                } else {
+                    Serial.print("\n[NTP] Ошибка: forceUpdate() не удался через сеть 2");
+                }
+                
+                timeClient->end();
+            } catch (...) {
+                Serial.print("\n[NTP] Исключение при синхронизации через сеть 2!");
+            }
+        } else {
+            Serial.print("\n[WiFi] Не удалось подключиться к сети 2 для повторной попытки");
+        }
+    }
+    
+    // 7. Отключаем WiFi
     Serial.print("\n[WiFi] Отключение...");
     WiFi.disconnect(true);
     delay(100);

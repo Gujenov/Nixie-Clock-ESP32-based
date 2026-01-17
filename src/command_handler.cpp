@@ -59,6 +59,19 @@ void handleCommand(String command) {
         String dateStr = command.startsWith("set local D ") ? command.substring(12) : command.substring(4);
         setManualLocalDate(dateStr);
     }
+    // Команды автосинхронизации
+    else if (command.equalsIgnoreCase("auto sync en") || command.equalsIgnoreCase("ASE")) {
+        config.time_config.auto_sync_enabled = true;
+        saveConfig();
+        Serial.println("\nАвтоматическая синхронизация времени ВКЛЮЧЕНА");
+        Serial.printf("Интервал синхронизации: %d часов\n", config.time_config.sync_interval_hours);
+    }
+    else if (command.equalsIgnoreCase("auto sync dis") || command.equalsIgnoreCase("ASD")) {
+        config.time_config.auto_sync_enabled = false;
+        saveConfig();
+        Serial.println("\nАвтоматическая синхронизация времени ОТКЛЮЧЕНА");
+        Serial.println("Время можно установить вручную или синхронизировать командой 'sync'");
+    }
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
         Serial.println("Или введите 'menu' для входа в режим настройки");
