@@ -4,6 +4,7 @@
 #include "alarm_handler.h"
 #include "hardware.h"
 #include "menu_manager.h"
+#include "engineering_menu.h"
 
 // Объявляем внешние переменные
 extern WiFiUDP ntpUDP;
@@ -23,6 +24,7 @@ void handleCommand(String command) {
             case MENU_WIFI: handleWifiMenu(command); break;
             case MENU_INFO: handleInfoMenu(command); break;
             case MENU_CONFIG: handleConfigMenu(command); break;
+            case MENU_ENGINEERING: handleEngineeringMenu(command); break;
             default: break;
         }
         return;
@@ -38,8 +40,11 @@ void handleCommand(String command) {
     else if (command.equals("menu") || command.equals("m")) {
         enterMenuMode();
     }
+    else if (command.equals("d")) {
+        enterEngineeringMenu();
+    }
     else if (command.equals("sync")) {
-        syncTime();
+        syncTime(true);
     }
     // Команды установки UTC времени и даты
     else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {

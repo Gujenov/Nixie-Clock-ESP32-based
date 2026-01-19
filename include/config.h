@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260116"
+#define FIRMWARE_VERSION "1.A0.3.260119"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -63,6 +63,11 @@ struct TimeConfig {
     uint32_t last_ntp_sync;           // Время последней NTP синхронизации (UNIX time)
     uint32_t last_dcf77_sync;         // Время последней DCF77 синхронизации
     uint8_t sync_failures;            // Счётчик неудачных синхронизаций
+
+    // === ОФЛАЙН ПРАВИЛА (POSIX от ezTime) ===
+    char tz_posix[64];                // POSIX-строка для локального времени
+    char tz_posix_zone[32];           // Зона, для которой сохранены правила
+    uint32_t tz_posix_updated;        // Время обновления (UNIX time)
     
     // === ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ ===
     bool manual_time_set;             // Время было установлено вручную

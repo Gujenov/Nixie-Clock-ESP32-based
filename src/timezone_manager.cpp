@@ -280,6 +280,23 @@ time_t utcToLocal(time_t utc) {
         // ezTime недоступен - переключаемся на локальную таблицу
         Serial.print("\n[TZ] ⚠️  ezTime недоступен (нет интернета?), переключение на локальную таблицу");
     }
+
+    // === РЕЖИМ 1b: Офлайн POSIX правила (если есть) ===
+    if (config.time_config.automatic_localtime &&
+        config.time_config.tz_posix[0] != '\0' &&
+        strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
+        if (localTZ.setPosix(String(config.time_config.tz_posix))) {
+            String tzname;
+            bool isdst = false;
+            int16_t offset_minutes = 0;
+            time_t local = localTZ.tzTime(utc, UTC_TIME, tzname, isdst, offset_minutes);
+            if (!(tzname.length() == 0 && offset_minutes == 0)) {
+                config.time_config.current_offset = -(offset_minutes / 60);
+                config.time_config.current_dst_active = isdst;
+                return local;
+            }
+        }
+    }
     
     // === РЕЖИМ 2: Локальная таблица (offline) или Fallback ===
     
@@ -347,6 +364,21 @@ time_t localToUtc(time_t local) {
         }
         
         Serial.print("\n[TZ] ⚠️  ezTime недоступен, fallback на локальную таблицу");
+    }
+
+    // === РЕЖИМ 1b: Офлайн POSIX правила (если есть) ===
+    if (config.time_config.automatic_localtime &&
+        config.time_config.tz_posix[0] != '\0' &&
+        strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
+        if (localTZ.setPosix(String(config.time_config.tz_posix))) {
+            String tzname;
+            bool isdst = false;
+            int16_t offset_minutes = 0;
+            time_t utc = localTZ.tzTime(local, LOCAL_TIME, tzname, isdst, offset_minutes);
+            if (!(tzname.length() == 0 && offset_minutes == 0)) {
+                return utc;
+            }
+        }
     }
     
     // === РЕЖИМ 2: Локальная таблица (offline) или Fallback ===
@@ -435,7 +467,7 @@ bool setTimezoneOffset(int8_t offset) {
 
 void printTimezoneInfo() {
     Serial.print("\n╔═══════════════════════════════════════════════════════");
-    Serial.print("\n║           ИНФОРМАЦИЯ О ЧАСОВОМ ПОЯСЕ");
+    Serial.print("\n║                  ТЕКУЩИЕ НАСТРОЙКИ");
     Serial.print("\n╠═══════════════════════════════════════════════════════");
     
     // Текущая локация
@@ -472,6 +504,8 @@ void printTimezoneInfo() {
             Serial.print("\n║ ОШИБКА: Локация не найдена в таблице");
         }
     }
+
+    Serial.printf("\n║ Автосинхронизация по UTC: %s", config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
     
     Serial.print("\n╚═══════════════════════════════════════════════════════\n");
 }
@@ -562,6 +596,64 @@ void listAvailableTimezones() {
     Serial.print("\n\nДля выбора локации часовой зоны введите её цифровое обозначение\n");
     printMappingMenuCommands();
     Serial.print("> ");
+}
+
+// ========== ОФЛАЙН ПРАВИЛА (POSIX) ==========
+
+bool savePosixOverride(const char* tz_name) {
+    if (!tz_name) return false;
+    String posix = localTZ.getPosix();
+    if (posix.length() == 0) return false;
+
+    strncpy(config.time_config.tz_posix, posix.c_str(), sizeof(config.time_config.tz_posix));
+    config.time_config.tz_posix[sizeof(config.time_config.tz_posix) - 1] = '\0';
+    strncpy(config.time_config.tz_posix_zone, tz_name, sizeof(config.time_config.tz_posix_zone));
+    config.time_config.tz_posix_zone[sizeof(config.time_config.tz_posix_zone) - 1] = '\0';
+    config.time_config.tz_posix_updated = time(nullptr);
+    return true;
+}
+
+bool clearPosixOverrideIfZone(const char* tz_name) {
+    if (!tz_name) return false;
+    if (config.time_config.tz_posix[0] == '\0') return false;
+    if (strcmp(config.time_config.tz_posix_zone, tz_name) != 0) return false;
+
+    config.time_config.tz_posix[0] = '\0';
+    config.time_config.tz_posix_zone[0] = '\0';
+    config.time_config.tz_posix_updated = 0;
+    return true;
+}
+
+bool getEzTimeData(time_t utc, int8_t &offset_hours, bool &dst_active) {
+    if (!config.time_config.automatic_localtime) return false;
+
+    if (!localTZ.setLocation(String(config.time_config.timezone_name))) {
+        return false;
+    }
+
+    localTZ.setDefault();
+    ezTimeAvailable = true;
+
+    String tzname;
+    bool isdst = false;
+    int16_t offset_minutes = 0;
+
+    for (int attempt = 0; attempt < 5; attempt++) {
+        events();
+        delay(200);
+
+        localTZ.tzTime(utc, UTC_TIME, tzname, isdst, offset_minutes);
+
+        if (tzname.length() > 0 || offset_minutes != 0) {
+            offset_hours = -(offset_minutes / 60);
+            dst_active = isdst;
+            config.time_config.current_offset = offset_hours;
+            config.time_config.current_dst_active = dst_active;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // ========== РУЧНАЯ НАСТРОЙКА СМЕЩЕНИЯ ==========
@@ -1020,8 +1112,8 @@ void compareDSTRules() {
         Serial.print("\n║   ⚠️  РАСХОЖДЕНИЕ ОБНАРУЖЕНО!");
         Serial.print("\n║   Возможные причины:");
         Serial.print("\n║   • Изменились политические правила DST");
-        Serial.print("\n║   • Требуется обновление таблицы переводов времени");
-        Serial.print("\n║   • Проблема с подключением к серверу ezTime");
+        Serial.print("\n║   • Требуется корректировка таблицы коррекции времени");
+        Serial.print("\n║   • Неверные данные от сервера ezTime");
     }
     
     Serial.print("\n╠════════════════════════════════════════════════════════════");

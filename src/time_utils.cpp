@@ -197,11 +197,17 @@ void setTimeToAllSources(time_t utcTime) {
    // printTimeFromTimeT(utcTime);
 }
 
-bool syncTime() {
+bool syncTime(bool force) {
+    const bool auto_sync_was_enabled = config.time_config.auto_sync_enabled;
     // Проверяем, разрешена ли синхронизация
-    if (!config.time_config.auto_sync_enabled) {
+    if (!force && !config.time_config.auto_sync_enabled) {
         Serial.print("\n\n[SYNC] Автоматическая синхронизация отключена");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+        if (config.time_config.automatic_localtime &&
+            config.time_config.tz_posix[0] != '\0' &&
+            strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
+            Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
+        }
         return false;
     }
     
@@ -209,6 +215,11 @@ bool syncTime() {
     if (strlen(config.wifi_ssid) == 0) {
         Serial.print("\n\n[SYNC] WiFi не настроен, автоматическая синхронизация невозможна");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+        if (config.time_config.automatic_localtime &&
+            config.time_config.tz_posix[0] != '\0' &&
+            strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
+            Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
+        }
         return false;
     }
     
@@ -283,7 +294,12 @@ bool syncTime() {
     // 4. Если не удалось подключиться ни к одной сети
     if (!wifi_connected) {
         Serial.print("\n[NTP] Ошибка: не удалось подключиться ни к одной WiFi сети");
-        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время\n");
+        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+        if (config.time_config.automatic_localtime &&
+            config.time_config.tz_posix[0] != '\0' &&
+            strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
+            Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
+        }
         digitalWrite(LED_PIN, LOW);
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
@@ -328,6 +344,9 @@ bool syncTime() {
                     
                     // Обновляем/инициализируем ezTime после подключения WiFi
                     if (setTimezone(config.time_config.timezone_name)) {
+                        if (force && !auto_sync_was_enabled) {
+                            config.time_config.auto_sync_enabled = false;
+                        }
                         for (int i = 0; i < 5; i++) {
                             events();
                             delay(200);
@@ -339,11 +358,14 @@ bool syncTime() {
                     bool old_dst = config.time_config.current_dst_active;
                     
                     // Получаем и выводим данные от ezTime
-                    time_t local_time = utcToLocal(utcTime);  // Это обновит current_offset и current_dst_active
-                    
-                    // Теперь в config.time_config.current_offset и current_dst_active - данные от ezTime
-                    int8_t eztime_offset = config.time_config.current_offset;
-                    bool eztime_dst = config.time_config.current_dst_active;
+                    int8_t eztime_offset = 0;
+                    bool eztime_dst = false;
+                    if (!getEzTimeData(utcTime, eztime_offset, eztime_dst)) {
+                        // Fallback: используем текущую логику конвертации (может быть таблица/офлайн POSIX)
+                        utcToLocal(utcTime);
+                        eztime_offset = config.time_config.current_offset;
+                        eztime_dst = config.time_config.current_dst_active;
+                    }
                     
                     Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
                                  eztime_offset,
@@ -358,10 +380,18 @@ bool syncTime() {
                         // Сравниваем данные от ezTime с данными из таблицы
                         if (eztime_offset == local_offset && eztime_dst == local_dst) {
                             Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
+                            if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
+                                saveConfig();
+                            }
                         } else {
-                            Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление прошивки");
+                            Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
                             Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
                             Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
+
+                            if (savePosixOverride(config.time_config.timezone_name)) {
+                                saveConfig();
+                                Serial.print("\n[TZ] 💾 POSIX правила сохранены для офлайн-работы");
+                            }
                         }
                     }
                 } else {
@@ -454,17 +484,22 @@ bool syncTime() {
                             
                             // Обновляем/инициализируем ezTime после подключения WiFi
                             if (setTimezone(config.time_config.timezone_name)) {
+                                if (force && !auto_sync_was_enabled) {
+                                    config.time_config.auto_sync_enabled = false;
+                                }
                                 for (int i = 0; i < 5; i++) {
                                     events();
                                     delay(200);
                                 }
                             }
                             
-                            time_t local_time = utcToLocal(utcTime);
-                            
-                            // Сохраняем данные от ezTime
-                            int8_t eztime_offset = config.time_config.current_offset;
-                            bool eztime_dst = config.time_config.current_dst_active;
+                            int8_t eztime_offset = 0;
+                            bool eztime_dst = false;
+                            if (!getEzTimeData(utcTime, eztime_offset, eztime_dst)) {
+                                utcToLocal(utcTime);
+                                eztime_offset = config.time_config.current_offset;
+                                eztime_dst = config.time_config.current_dst_active;
+                            }
                             
                             Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
                                          eztime_offset,
@@ -478,10 +513,18 @@ bool syncTime() {
                                 // Сравниваем данные от ezTime с данными из таблицы
                                 if (eztime_offset == local_offset && eztime_dst == local_dst) {
                                     Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
+                                    if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
+                                        saveConfig();
+                                    }
                                 } else {
-                                    Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление прошивки");
+                                    Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
                                     Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
                                     Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
+
+                                    if (savePosixOverride(config.time_config.timezone_name)) {
+                                        saveConfig();
+                                        Serial.print("\n[TZ] 💾 POSIX правила сохранены для офлайн-работы");
+                                    }
                                 }
                             }
                         } else {
@@ -526,6 +569,11 @@ bool syncTime() {
         blinkError(11);
         Serial.print("\n[NTP] Не удалось синхронизировать время!");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
+        if (config.time_config.automatic_localtime &&
+            config.time_config.tz_posix[0] != '\0' &&
+            strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
+            Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
+        }
     } else {
         Serial.println("\n[NTP] Синхронизация успешна!");
     }

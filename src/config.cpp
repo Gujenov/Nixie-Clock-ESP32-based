@@ -42,6 +42,13 @@ void initConfiguration() {
       config.time_config.manual_dst_end_dow = 0;
       config.time_config.manual_dst_end_hour = 0;
     }
+
+    // Инициализация офлайн правил (POSIX)
+    if (config.time_config.tz_posix[0] == '\0') {
+      config.time_config.tz_posix[0] = '\0';
+      config.time_config.tz_posix_zone[0] = '\0';
+      config.time_config.tz_posix_updated = 0;
+    }
     
     // Пересохраняем с новым размером
     preferences.putBytes("data", &config, sizeof(config));
@@ -111,6 +118,11 @@ void setDefaultConfig() {
     config.time_config.manual_dst_end_week = 0;
     config.time_config.manual_dst_end_dow = 0;
     config.time_config.manual_dst_end_hour = 0;
+
+    // Офлайн правила (POSIX)
+    config.time_config.tz_posix[0] = '\0';
+    config.time_config.tz_posix_zone[0] = '\0';
+    config.time_config.tz_posix_updated = 0;
     
     // Дополнительные настройки
     config.time_config.manual_time_set = false;

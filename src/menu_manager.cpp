@@ -117,12 +117,11 @@ void printTimeMenu() {
     Serial.println("  set local D, SLD DD.MM.YY - Установить локальную дату");
     
     Serial.println("\nАвтоматическая синхронизация времени по UTC:");
-    Serial.printf("  Статус: %s\n", config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
     Serial.println("  auto sync en, ASE - Включить автосинхронизацию");
     Serial.println("  auto sync dis, ASD - Отключить автосинхронизацию");
     
-    Serial.println("\nУстановки часовыхпоясов:");
-    //Serial.println("  tz                - Информация о текущем поясе и настройке (ручной/авто)");
+    Serial.println("\nЧасовые пояса:");
+    
     Serial.println("  tz list, tzl      - Выбор доступных поясов (пресеты и именованные зоны)");
     Serial.println("  tz auto, tza      - Автоматическое определение пояса");
     Serial.println("  tz manual, tzm    - Отключить автоопределение");
@@ -212,7 +211,7 @@ void handleTimeMenu(String command) {
         printTime();
     }
     else if (command.equals("sync")) {
-        syncTime();
+        syncTime(true);
     }
     // Команды установки UTC времени и даты
     else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {
@@ -271,7 +270,6 @@ void handleTimeMenu(String command) {
                     }
                 } else {
                     Serial.printf("\nНеверный номер. Введите число от 1 до %d\n", count);
-                    tz_list_state = 0;
                     return;
                 }
             }
@@ -304,6 +302,8 @@ void handleTimeMenu(String command) {
                     tz_list_state = 0;
                     return;
                 }
+                Serial.printf("\nНеверный номер. Введите число от 1 до %d\n", non_dst_count);
+                return;
             }
         }
 
@@ -523,7 +523,7 @@ void handleWifiMenu(String command) {
             Serial.println("\nWiFi не настроен, синхронизация NTP невозможна (установите WiFi)");
         } else {
             Serial.print("Пытаюсь синхронизироваться с новым NTP сервером...");
-            if (syncTime()) {
+            if (syncTime(true)) {
                 Serial.println("\nСинхронизация NTP выполнена успешно\n");
             } else {
                 Serial.println("\nНе удалось синхронизироваться с NTP сервером\n");

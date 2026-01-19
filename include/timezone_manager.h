@@ -48,4 +48,9 @@ time_t calculateDSTTransition(int year, uint8_t month, uint8_t week, uint8_t dow
 void printTimezoneInfo();
 void listAvailableTimezones();
 void compareDSTRules();  // Сравнение правил ezTime с локальной таблицей
+
+// Офлайн правила (POSIX)
+bool savePosixOverride(const char* tz_name);
+bool clearPosixOverrideIfZone(const char* tz_name);
+bool getEzTimeData(time_t utc, int8_t &offset_hours, bool &dst_active);
 void setupManualOffset();  // Ручная настройка смещения
