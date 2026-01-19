@@ -17,8 +17,9 @@ static const TimezonePreset TIMEZONE_PRESETS[] = {
     // Приоритетные зоны
     {"CET", "Центральноевропейское (CET)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
     {"Europe/London", "Лондон (GMT/BST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
-    {"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
-    
+    {"Europe/Warsaw", "Варшава (CET/CEST)", 3, 4, 3, 5, 0, 2, 10, 5, 0, 3},
+    //{"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
+
     // Западноевропейское время (WET/WEST) - UTC+0/+1
     {"Europe/Lisbon", "Лиссабон (WET/WEST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
     {"Europe/Dublin", "Дублин (GMT/IST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
@@ -244,23 +245,8 @@ bool initTimezone() {
     }
     
     Serial.printf("\n[TZ] Инициализация: %s", preset->display_name);
-    
-    // Если включён режим автоматического локального времени - пробуем загрузить ezTime
-    if (config.time_config.automatic_localtime) {
-        if (localTZ.setLocation(String(config.time_config.timezone_name))) {
-            localTZ.setDefault();
-            ezTimeAvailable = true;
-            Serial.print("\n[TZ] Режим: ezTime (online с правилами DST\n)");
-            return true;
-        } else {
-            Serial.print("\n[TZ] ezTime недоступен, переключаюсь на локальную таблицу");
-            ezTimeAvailable = false;
-        }
-    } else {
-        ezTimeAvailable = false;
-        Serial.print("\n[TZ] Режим: Локальная таблица (offline)");
-    }
-    
+
+    ezTimeAvailable = false;
     return true;
 }
 
@@ -277,28 +263,15 @@ time_t utcToLocal(time_t utc) {
         time_t local = localTZ.tzTime(utc, UTC_TIME, tzname, isdst, offset_minutes);
         
         // ПРОВЕРКА: если ezTime вернул некорректное значение (нет связи с сервером)
-        // Признак: offset_minutes == 0 и tzname пустой, или local == utc для зон с ненулевым offset
-        bool eztime_failed = false;
-        
-        // Находим локальную таблицу для сравнения
-        const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
-        
-        if (preset) {
-            // Если ezTime вернул нулевое смещение для зоны, где должно быть ненулевое
-            if (offset_minutes == 0 && (preset->std_offset != 0 || preset->dst_offset != 0)) {
-                eztime_failed = true;
-            }
-            // Или если смещение сильно отличается от ожидаемого (больше чем на 2 часа)
-            else if (abs((offset_minutes / 60) - preset->std_offset) > 2 && 
-                     abs((offset_minutes / 60) - preset->dst_offset) > 2) {
-                eztime_failed = true;
-            }
-        }
+        // Признак: tzname пустой и offset_minutes == 0 (обычно ezTime не инициализирован)
+        bool eztime_failed = (tzname.length() == 0 && offset_minutes == 0);
         
         // Если ezTime работает нормально - используем его результат
         if (!eztime_failed) {
             // Обновляем кэшированные значения для отображения
-            config.time_config.current_offset = offset_minutes / 60;
+            // ВАЖНО: ezTime использует POSIX формат, где знаки инвертированы!
+            // POSIX: CET-1 означает UTC+1 (минус = восток от UTC)
+            config.time_config.current_offset = -(offset_minutes / 60);
             config.time_config.current_dst_active = isdst;
             
             return local;
@@ -366,18 +339,7 @@ time_t localToUtc(time_t local) {
         time_t utc = localTZ.tzTime(local, LOCAL_TIME, tzname, isdst, offset_minutes);
         
         // ПРОВЕРКА: если ezTime вернул некорректное значение
-        bool eztime_failed = false;
-        
-        const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
-        if (preset) {
-            if (offset_minutes == 0 && (preset->std_offset != 0 || preset->dst_offset != 0)) {
-                eztime_failed = true;
-            }
-            else if (abs((offset_minutes / 60) - preset->std_offset) > 2 && 
-                     abs((offset_minutes / 60) - preset->dst_offset) > 2) {
-                eztime_failed = true;
-            }
-        }
+        bool eztime_failed = (tzname.length() == 0 && offset_minutes == 0);
         
         // Если ezTime работает - возвращаем результат
         if (!eztime_failed) {
@@ -440,28 +402,13 @@ bool setTimezone(const char* tz_name) {
     config.time_config.timezone_name[sizeof(config.time_config.timezone_name)-1] = '\0';
     
     Serial.printf("\n[TZ] Установлена локация: %s", preset->display_name);
-    
-    // Если включён режим automatic_localtime - пробуем загрузить ezTime
-    if (config.time_config.automatic_localtime) {
-        if (localTZ.setLocation(String(tz_name))) {
-            localTZ.setDefault();
-            ezTimeAvailable = true;
-            Serial.print(" → ezTime загружен успешно");
-            
-            // Принудительно обновляем current_offset через utcToLocal
-            time_t now = time(nullptr);
-            utcToLocal(now);
-            
-            return true;
-        } else {
-            Serial.print(" → ezTime недоступен, используется таблица");
-            ezTimeAvailable = false;
-        }
-    } else {
-        ezTimeAvailable = false;
-        Serial.printf(" → Таблица: UTC%+d (std), UTC%+d (DST)", preset->std_offset, preset->dst_offset);
+
+    // Любая неручная зона включает автоматический режим и автосинхронизацию
+    if (strcmp(tz_name, "MANUAL") != 0) {
+        config.time_config.automatic_localtime = true;
+        config.time_config.auto_sync_enabled = true;
     }
-    
+      
     // Принудительно обновляем current_offset через utcToLocal (для режима таблицы)
     time_t now = time(nullptr);
     utcToLocal(now);
@@ -997,17 +944,11 @@ void compareDSTRules() {
         Serial.printf("    - ezTime строка: %s\n", ez_time_str.c_str());
         
         // Проверяем корректность данных
-        // Для зон с ненулевым смещением offset не должен быть 0
-        if (preset->std_offset != 0 || preset->dst_offset != 0) {
-            if (offset_minutes_now != 0) {
-                Serial.print("    ✓ Данные валидны (смещение ненулевое)\n");
-                data_valid = true;
-            } else {
-                Serial.print("    ✗ Данные невалидны (смещение должно быть ненулевым)\n");
-            }
+        // Нулевое смещение может быть валидным (UTC/GMT зоны)
+        if (tzname_now.length() == 0 && offset_minutes_now == 0) {
+            Serial.print("    ✗ Данные невалидны (ezTime не инициализирован)\n");
         } else {
-            // Для UTC зоны offset может быть 0
-            Serial.print("    ✓ Данные валидны (UTC зона)\n");
+            Serial.print("    ✓ Данные валидны\n");
             data_valid = true;
         }
     }

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "hardware.h"
 #include "timezone_manager.h"
+#include <ezTime.h>
 
 extern WiFiUDP ntpUDP;         // Определен где-то еще (возможно в .ino)
 extern NTPClient *timeClient;  // Определен в config.cpp
@@ -325,11 +326,28 @@ bool syncTime() {
                     Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
                     Serial.printf("\n[TZ] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
                     
+                    // Обновляем/инициализируем ezTime после подключения WiFi
+                    if (setTimezone(config.time_config.timezone_name)) {
+                        for (int i = 0; i < 5; i++) {
+                            events();
+                            delay(200);
+                        }
+                    }
+                    
+                    // Сохраняем текущие значения ДО вызова utcToLocal
+                    int8_t old_offset = config.time_config.current_offset;
+                    bool old_dst = config.time_config.current_dst_active;
+                    
                     // Получаем и выводим данные от ezTime
                     time_t local_time = utcToLocal(utcTime);  // Это обновит current_offset и current_dst_active
+                    
+                    // Теперь в config.time_config.current_offset и current_dst_active - данные от ezTime
+                    int8_t eztime_offset = config.time_config.current_offset;
+                    bool eztime_dst = config.time_config.current_dst_active;
+                    
                     Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
-                                 config.time_config.current_offset,
-                                 config.time_config.current_dst_active ? "ON" : "OFF");
+                                 eztime_offset,
+                                 eztime_dst ? "ON" : "OFF");
                     
                     // Сверяем с локальной таблицей
                     const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
@@ -337,11 +355,13 @@ bool syncTime() {
                         bool local_dst = calculateDSTStatus(utcTime, preset);
                         int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
                         
-                        if (config.time_config.current_offset == local_offset && 
-                            config.time_config.current_dst_active == local_dst) {
+                        // Сравниваем данные от ezTime с данными из таблицы
+                        if (eztime_offset == local_offset && eztime_dst == local_dst) {
                             Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
                         } else {
                             Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление прошивки");
+                            Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
+                            Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
                         }
                     }
                 } else {
@@ -432,21 +452,36 @@ bool syncTime() {
                             Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
                             Serial.printf("\n[TZ] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
                             
+                            // Обновляем/инициализируем ezTime после подключения WiFi
+                            if (setTimezone(config.time_config.timezone_name)) {
+                                for (int i = 0; i < 5; i++) {
+                                    events();
+                                    delay(200);
+                                }
+                            }
+                            
                             time_t local_time = utcToLocal(utcTime);
+                            
+                            // Сохраняем данные от ezTime
+                            int8_t eztime_offset = config.time_config.current_offset;
+                            bool eztime_dst = config.time_config.current_dst_active;
+                            
                             Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
-                                         config.time_config.current_offset,
-                                         config.time_config.current_dst_active ? "ON" : "OFF");
+                                         eztime_offset,
+                                         eztime_dst ? "ON" : "OFF");
                             
                             const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
                             if (preset) {
                                 bool local_dst = calculateDSTStatus(utcTime, preset);
                                 int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
                                 
-                                if (config.time_config.current_offset == local_offset && 
-                                    config.time_config.current_dst_active == local_dst) {
+                                // Сравниваем данные от ezTime с данными из таблицы
+                                if (eztime_offset == local_offset && eztime_dst == local_dst) {
                                     Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
                                 } else {
                                     Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление прошивки");
+                                    Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
+                                    Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
                                 }
                             }
                         } else {
