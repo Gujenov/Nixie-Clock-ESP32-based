@@ -49,6 +49,9 @@ void printTimezoneInfo();
 void listAvailableTimezones();
 void compareDSTRules();  // Сравнение правил ezTime с локальной таблицей
 
+// Сравнение переходов DST (ezTime vs таблица) по годам
+bool compareDSTRulesWithEzTime(const TimezonePreset* preset, int startYear, int yearsToCheck, bool printDetails);
+
 // Офлайн правила (POSIX)
 bool savePosixOverride(const char* tz_name);
 bool clearPosixOverrideIfZone(const char* tz_name);

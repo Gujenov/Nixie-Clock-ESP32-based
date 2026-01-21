@@ -2,6 +2,7 @@
 #include "menu_manager.h"
 #include "config.h"
 #include "hardware.h"
+#include "time_utils.h"
 
 extern bool printEnabled;
 

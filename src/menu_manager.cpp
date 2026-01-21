@@ -111,14 +111,14 @@ void printTimeMenu() {
     Serial.println("\nУстановки времени:");
     Serial.println("  time, t                  - Текущее время (UTC и локальное)");
     Serial.println("  sync                     - Синхронизировать с NTP");
-    Serial.println("  set UTC T, SUT HH:MM:SS  - Установить UTC время");
-    Serial.println("  set UTC D, SUD DD.MM.YY  - Установить UTC дату");
-    Serial.println("  set local T, SLT HH:MM:SS - Установить локальное время");
-    Serial.println("  set local D, SLD DD.MM.YY - Установить локальную дату");
+    Serial.println("  set UTC T, sut HH:MM:SS  - Установить UTC время");
+    Serial.println("  set UTC D, sud DD.MM.YY  - Установить UTC дату");
+    Serial.println("  set local T, slt HH:MM:SS - Установить локальное время");
+    Serial.println("  set local D, sld DD.MM.YY - Установить локальную дату");
     
     Serial.println("\nАвтоматическая синхронизация времени по UTC:");
-    Serial.println("  auto sync en, ASE - Включить автосинхронизацию");
-    Serial.println("  auto sync dis, ASD - Отключить автосинхронизацию");
+    Serial.println("  auto sync en, ase - Включить автосинхронизацию");
+    Serial.println("  auto sync dis, asd - Отключить автосинхронизацию");
     
     Serial.println("\nЧасовые пояса:");
     
@@ -214,21 +214,21 @@ void handleTimeMenu(String command) {
         syncTime(true);
     }
     // Команды установки UTC времени и даты
-    else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {
-        String timeStr = command.startsWith("set UTC T ") ? command.substring(10) : command.substring(4);
+    else if (command.startsWith("set UTC T ") || command.startsWith("SUT ") || command.startsWith("sut ") || command.startsWith("set utc t ")) {
+        String timeStr = (command.startsWith("set UTC T ") || command.startsWith("set utc t ")) ? command.substring(10) : command.substring(4);
         setManualTime(timeStr);
     }
-    else if (command.startsWith("set UTC D ") || command.startsWith("SUD ")) {
-        String dateStr = command.startsWith("set UTC D ") ? command.substring(10) : command.substring(4);
+    else if (command.startsWith("set UTC D ") || command.startsWith("SUD ") || command.startsWith("sud ") || command.startsWith("set utc d ")) {
+        String dateStr = (command.startsWith("set UTC D ") || command.startsWith("set utc d ")) ? command.substring(10) : command.substring(4);
         setManualDate(dateStr);
     }
     // Команды установки локального времени и даты
-    else if (command.startsWith("set local T ") || command.startsWith("SLT ")) {
-        String timeStr = command.startsWith("set local T ") ? command.substring(12) : command.substring(4);
+    else if (command.startsWith("set local T ") || command.startsWith("set local t ") || command.startsWith("SLT ") || command.startsWith("slt ")) {
+        String timeStr = (command.startsWith("set local T ") || command.startsWith("set local t ")) ? command.substring(12) : command.substring(4);
         setManualLocalTime(timeStr);
     }
-    else if (command.startsWith("set local D ") || command.startsWith("SLD ")) {
-        String dateStr = command.startsWith("set local D ") ? command.substring(12) : command.substring(4);
+    else if (command.startsWith("set local D ") || command.startsWith("set local d ") || command.startsWith("SLD ") || command.startsWith("sld ")) {
+        String dateStr = (command.startsWith("set local D ") || command.startsWith("set local d ")) ? command.substring(12) : command.substring(4);
         setManualLocalDate(dateStr);
     }
     else {

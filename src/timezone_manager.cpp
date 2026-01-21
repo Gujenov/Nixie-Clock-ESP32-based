@@ -17,8 +17,8 @@ static const TimezonePreset TIMEZONE_PRESETS[] = {
     // Приоритетные зоны
     {"CET", "Центральноевропейское (CET)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
     {"Europe/London", "Лондон (GMT/BST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
-    {"Europe/Warsaw", "Варшава (CET/CEST)", 3, 4, 3, 5, 0, 2, 10, 5, 0, 3},
-    //{"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
+    {"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
+  //{"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
 
     // Западноевропейское время (WET/WEST) - UTC+0/+1
     {"Europe/Lisbon", "Лиссабон (WET/WEST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
@@ -198,6 +198,171 @@ bool calculateDSTStatus(time_t utc, const TimezonePreset* preset) {
     
     // Для северного полушария
     return (utc >= dst_start && utc < dst_end);
+}
+
+// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ СРАВНЕНИЯ ПРАВИЛ DST =====
+static bool getEzTimeDstState(time_t utc, bool &isdst, int16_t &offset_minutes) {
+    String tzname;
+    isdst = false;
+    offset_minutes = 0;
+    localTZ.tzTime(utc, UTC_TIME, tzname, isdst, offset_minutes);
+    return tzname.length() > 0;
+}
+
+static time_t makeUtcTime(int year, int month, int day, int hour, int minute, int second) {
+    struct tm tm_time = {0};
+    tm_time.tm_year = year - 1900;
+    tm_time.tm_mon = month - 1;
+    tm_time.tm_mday = day;
+    tm_time.tm_hour = hour;
+    tm_time.tm_min = minute;
+    tm_time.tm_sec = second;
+    tm_time.tm_isdst = 0;
+    return mktime(&tm_time);
+}
+
+static void sortTransitions(time_t *arr, uint8_t count) {
+    for (uint8_t i = 0; i + 1 < count; ++i) {
+        for (uint8_t j = i + 1; j < count; ++j) {
+            if (arr[j] < arr[i]) {
+                time_t tmp = arr[i];
+                arr[i] = arr[j];
+                arr[j] = tmp;
+            }
+        }
+    }
+}
+
+static bool getEzTimeTransitionsForYear(int year, time_t *transitions, uint8_t &count) {
+    count = 0;
+    time_t start = makeUtcTime(year, 1, 1, 0, 0, 0);
+    time_t end = makeUtcTime(year + 1, 1, 1, 0, 0, 0);
+
+    bool prev_dst = false;
+    int16_t prev_offset = 0;
+    if (!getEzTimeDstState(start, prev_dst, prev_offset)) {
+        return false;
+    }
+
+    const time_t step = 6 * 3600; // 6 часов
+    for (time_t cur = start; cur + step <= end && count < 2; cur += step) {
+        bool next_dst = false;
+        int16_t next_offset = 0;
+        if (!getEzTimeDstState(cur + step, next_dst, next_offset)) {
+            return false;
+        }
+
+        if (next_dst != prev_dst) {
+            time_t lo = cur;
+            time_t hi = cur + step;
+            for (int i = 0; i < 20 && (hi - lo) > 60; ++i) {
+                time_t mid = lo + (hi - lo) / 2;
+                bool mid_dst = false;
+                int16_t mid_offset = 0;
+                if (!getEzTimeDstState(mid, mid_dst, mid_offset)) {
+                    return false;
+                }
+                if (mid_dst == prev_dst) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            transitions[count++] = hi;
+            prev_dst = next_dst;
+        }
+    }
+
+    sortTransitions(transitions, count);
+    return true;
+}
+
+static bool getTableTransitionsForYear(const TimezonePreset* preset, int year, time_t *transitions, uint8_t &count) {
+    count = 0;
+    if (!preset || preset->dst_start_month == 0 || preset->dst_offset == preset->std_offset) {
+        return true;
+    }
+
+    transitions[count++] = calculateDSTTransition(year, preset->dst_start_month, preset->dst_start_week,
+                                                   preset->dst_start_dow, preset->dst_start_hour, preset->std_offset);
+    transitions[count++] = calculateDSTTransition(year, preset->dst_end_month, preset->dst_end_week,
+                                                   preset->dst_end_dow, preset->dst_end_hour, preset->dst_offset);
+    sortTransitions(transitions, count);
+    return true;
+}
+
+static void formatUtcTime(time_t t, char *buf, size_t len) {
+    struct tm *tm_info = gmtime(&t);
+    if (!tm_info) {
+        snprintf(buf, len, "(invalid)");
+        return;
+    }
+    snprintf(buf, len, "%04d-%02d-%02d %02d:%02d UTC",
+             tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
+             tm_info->tm_hour, tm_info->tm_min);
+}
+
+bool compareDSTRulesWithEzTime(const TimezonePreset* preset, int startYear, int yearsToCheck, bool printDetails) {
+    if (!preset || yearsToCheck <= 0) {
+        return true;
+    }
+
+    bool all_match = true;
+    for (int year = startYear; year < startYear + yearsToCheck; ++year) {
+        time_t ez_trans[2] = {0, 0};
+        time_t table_trans[2] = {0, 0};
+        uint8_t ez_count = 0;
+        uint8_t table_count = 0;
+
+        if (!getEzTimeTransitionsForYear(year, ez_trans, ez_count)) {
+            if (printDetails) {
+                Serial.printf("\n[TZ] ⚠️  ezTime не готов для сравнения переходов (%d год)", year);
+            }
+            return true;
+        }
+
+        getTableTransitionsForYear(preset, year, table_trans, table_count);
+
+        bool year_match = (ez_count == table_count);
+        if (year_match) {
+            for (uint8_t i = 0; i < ez_count; ++i) {
+                long diff = labs((long)(ez_trans[i] - table_trans[i]));
+                if (diff > 60) {
+                    year_match = false;
+                    break;
+                }
+            }
+        }
+
+        all_match = all_match && year_match;
+
+        if (printDetails) {
+            Serial.printf("\n║ Переходы DST (%d):", year);
+            if (ez_count == 0) {
+                Serial.print("\n║   ezTime:  DST не используется");
+            } else {
+                char buf1[32];
+                char buf2[32];
+                formatUtcTime(ez_trans[0], buf1, sizeof(buf1));
+                formatUtcTime(ez_trans[1], buf2, sizeof(buf2));
+                Serial.printf("\n║   ezTime:  %s | %s", buf1, buf2);
+            }
+
+            if (table_count == 0) {
+                Serial.print("\n║   Таблица: DST не используется");
+            } else {
+                char buf1[32];
+                char buf2[32];
+                formatUtcTime(table_trans[0], buf1, sizeof(buf1));
+                formatUtcTime(table_trans[1], buf2, sizeof(buf2));
+                Serial.printf("\n║   Таблица: %s | %s", buf1, buf2);
+            }
+
+            Serial.printf("\n║   Итог: %s", year_match ? "СОВПАДАЮТ" : "РАСХОЖДЕНИЕ");
+        }
+    }
+
+    return all_match;
 }
 
 // ========== ИНИЦИАЛИЗАЦИЯ ==========
@@ -506,6 +671,8 @@ void printTimezoneInfo() {
     }
 
     Serial.printf("\n║ Автосинхронизация по UTC: %s", config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
+    Serial.printf("\n║ Локальное время: %s",
+                  config.time_config.automatic_localtime ? "ИНТЕРЕНЕТ + проверка актуальности таблицы" : "ТАБЛИЦА / НОВОЕ ПРАВИЛО DST - если есть");
     
     Serial.print("\n╚═══════════════════════════════════════════════════════\n");
 }
@@ -1101,7 +1268,7 @@ void compareDSTRules() {
     Serial.printf("\n║   Таблица:   UTC%+d, DST: %s", 
                   local_offset_now, local_dst_now ? "ДА" : "НЕТ");
     
-    // Проверяем совпадение
+    // Проверяем совпадение текущего статуса
     bool match = (eztime_offset_now == local_offset_now) && (isdst_now == local_dst_now);
     
     if (match) {
@@ -1142,9 +1309,15 @@ void compareDSTRules() {
         Serial.printf("\n║   Постоянное смещение: UTC%+d (DST не используется)", preset->std_offset);
     }
     
+    // Сравниваем переходы DST (текущий и следующий год)
+    struct tm* now_tm = gmtime(&now);
+    int year = now_tm ? (now_tm->tm_year + 1900) : 0;
+    bool rules_match = (year > 0) ? compareDSTRulesWithEzTime(preset, year, 2, true) : true;
+    bool overall_match = match && rules_match;
+    
     Serial.print("\n╚════════════════════════════════════════════════════════════\n");
     
-    if (!match) {
+    if (!overall_match) {
         Serial.print("\n💡 РЕКОМЕНДАЦИЯ: проверьте наличие обновлений прошивки\n");
     }
     

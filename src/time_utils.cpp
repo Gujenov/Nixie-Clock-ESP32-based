@@ -376,17 +376,26 @@ bool syncTime(bool force) {
                     if (preset) {
                         bool local_dst = calculateDSTStatus(utcTime, preset);
                         int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
-                        
-                        // Сравниваем данные от ezTime с данными из таблицы
-                        if (eztime_offset == local_offset && eztime_dst == local_dst) {
+
+                        bool current_match = (eztime_offset == local_offset && eztime_dst == local_dst);
+                        struct tm* utc_tm = gmtime(&utcTime);
+                        int year = utc_tm ? (utc_tm->tm_year + 1900) : 0;
+                        bool rules_match = (year > 0) ? compareDSTRulesWithEzTime(preset, year, 2, false) : true;
+
+                        if (current_match && rules_match) {
                             Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
                             if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
                                 saveConfig();
                             }
                         } else {
                             Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
-                            Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
-                            Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
+                            if (!current_match) {
+                                Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
+                                Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
+                            }
+                            if (!rules_match) {
+                                Serial.print("\n[TZ]    Переходы DST: РАСХОЖДЕНИЕ");
+                            }
 
                             if (savePosixOverride(config.time_config.timezone_name)) {
                                 saveConfig();

@@ -76,8 +76,11 @@ void loop() {
 
 void processSecondTick() {
     time_t currentTime = getCurrentUTCTime();
-   
+    time_t localTime = utcToLocal(currentTime);
+    
     struct tm* tm_info = gmtime(&currentTime);
+    struct tm local_tm_info;
+    gmtime_r(&localTime, &local_tm_info);
     uint8_t currentSecond = tm_info->tm_sec;
     
     // Индикация работы
@@ -100,10 +103,10 @@ void processSecondTick() {
     
     // Синхронизация
     static uint8_t lastSyncHour = 255;
-    if ((tm_info->tm_hour == 0 || tm_info->tm_hour == 12) && tm_info->tm_min == 0) {
-        if (tm_info->tm_hour != lastSyncHour) {
+    if ((local_tm_info.tm_hour == 0 || local_tm_info.tm_hour == 12) && local_tm_info.tm_min == 5) {
+        if (local_tm_info.tm_hour != lastSyncHour) {
             syncTime();
-            lastSyncHour = tm_info->tm_hour;
+            lastSyncHour = local_tm_info.tm_hour;
         }
     }
 }
