@@ -69,7 +69,6 @@ void handleCommand(String command) {
         config.time_config.auto_sync_enabled = true;
         saveConfig();
         Serial.println("\nАвтоматическая синхронизация времени ВКЛЮЧЕНА");
-        Serial.printf("Интервал синхронизации: %d часов\n", config.time_config.sync_interval_hours);
     }
     else if (command.equalsIgnoreCase("auto sync dis") || command.equalsIgnoreCase("ASD")) {
         config.time_config.auto_sync_enabled = false;

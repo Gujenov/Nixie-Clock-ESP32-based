@@ -340,7 +340,7 @@ bool syncTime(bool force) {
                 // Показываем информацию о режиме работы с часовыми поясами
                 if (config.time_config.automatic_localtime) {
                     Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
-                    Serial.printf("\n[TZ] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+                    Serial.printf("\n[TZ] Задана локация: %s (режим: ezTime online)", config.time_config.timezone_name);
                     
                     // Обновляем/инициализируем ezTime после подключения WiFi
                     if (setTimezone(config.time_config.timezone_name)) {

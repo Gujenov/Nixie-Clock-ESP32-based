@@ -292,7 +292,6 @@ if (currentSource == NETWORK_NTP && ntpAvailable) {
 
 ### Конфигурационные параметры
 - `auto_sync_enabled` - автоматическая NTP синхронизация
-- `sync_interval_hours` - интервал синхронизации
 - `dcf77_enabled` - включение радиосинхронизации (в разработке)
 
 ### Мониторинг состояния

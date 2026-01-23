@@ -109,23 +109,23 @@ void printTimeMenu() {
     printTimezoneInfo();
     
     Serial.println("\nУстановки времени:");
-    Serial.println("  time, t                  - Текущее время (UTC и локальное)");
-    Serial.println("  sync                     - Синхронизировать с NTP");
-    Serial.println("  set UTC T, sut HH:MM:SS  - Установить UTC время");
-    Serial.println("  set UTC D, sud DD.MM.YY  - Установить UTC дату");
-    Serial.println("  set local T, slt HH:MM:SS - Установить локальное время");
-    Serial.println("  set local D, sld DD.MM.YY - Установить локальную дату");
+    Serial.println("  time / t                   - Текущее время (UTC и локальное)");
+    Serial.println("  sync                       - Синхронизировать с NTP");
+    Serial.println("  set UTC T / sut HH:MM:SS   - Установить UTC время");
+    Serial.println("  set UTC D / sud DD.MM.YY   - Установить UTC дату");
+    Serial.println("  set local T / slt HH:MM:SS - Установить локальное время");
+    Serial.println("  set local D / sld DD.MM.YY - Установить локальную дату");
     
     Serial.println("\nАвтоматическая синхронизация времени по UTC:");
-    Serial.println("  auto sync en, ase - Включить автосинхронизацию");
-    Serial.println("  auto sync dis, asd - Отключить автосинхронизацию");
+    Serial.println("  auto sync en / ase   - Включить автосинхронизацию");
+    Serial.println("  auto sync dis / asd - Отключить автосинхронизацию");
     
     Serial.println("\nЧасовые пояса:");
     
-    Serial.println("  tz list, tzl      - Выбор доступных поясов (пресеты и именованные зоны)");
-    Serial.println("  tz auto, tza      - Автоматическое определение пояса");
-    Serial.println("  tz manual, tzm    - Отключить автоопределение");
-    Serial.println("  tz check, tzc     - Сравнить правила DST (ezTime vs таблица)");
+    Serial.println("  tz list / tzl      - Выбор доступных поясов (пресеты и именованные зоны)");
+    Serial.println("  tz auto / tza      - Автоматическое определение пояса");
+    Serial.println("  tz manual / tzm    - Отключить автоопределение");
+    Serial.println("  tz check / tzc     - Сравнить правила DST (ezTime vs таблица)");
 
     printMappingMenuCommands();  //Управление меню
 }
@@ -347,15 +347,66 @@ void handleTimeMenu(String command) {
 
 // ======================= МЕНЮ Будильников (уровень 2) =======================
 
+static uint8_t parseDaysMask(const String &input) {
+    String s = input;
+    s.trim();
+    s.toLowerCase();
+
+    if (s == "weekdays" || s == "wd") return 0x1F; // Пн-Пт
+    if (s == "weekends" || s == "we") return 0x60; // Сб-Вс
+    if (s == "all") return 0x7F;
+
+    String buf = s;
+    buf.replace(',', ' ');
+
+    uint8_t mask = 0;
+    int start = 0;
+    while (start < buf.length()) {
+        while (start < buf.length() && buf[start] == ' ') start++;
+        if (start >= buf.length()) break;
+        int end = buf.indexOf(' ', start);
+        if (end == -1) end = buf.length();
+        String token = buf.substring(start, end);
+        token.trim();
+        int day = token.toInt();
+        if (day >= 1 && day <= 7) {
+            uint8_t bit = (day == 7) ? 6 : static_cast<uint8_t>(day - 1);
+            mask |= (1 << bit);
+        }
+        start = end + 1;
+    }
+
+    return mask;
+}
+
+static bool containsDayDigits(const String &input) {
+    for (size_t i = 0; i < input.length(); ++i) {
+        if (input[i] >= '1' && input[i] <= '7') return true;
+    }
+    return false;
+}
+
+static bool isDaysKeyword(const String &input) {
+    String s = input;
+    s.trim();
+    s.toLowerCase();
+    return (s == "weekdays" || s == "weekends" || s == "all" || s == "wd" || s == "we");
+}
+
 void printAlarmMenu() {
     //Serial.println("\n=== СОСТОЯНИЕ БУДИЛЬНИКОВ ===");
     // Показываем текущее состояние будильников
     printAlarmStatus();
     
-    Serial.println("  set al 1 [HH:MM] - установить время будильника 1");
-    Serial.println("  al 1 sound [num] - установить номер мелодии для будильника 1");
-    Serial.println("\n  set al 2 [HH:MM] - установить время будильника 2");
-    Serial.println("  al 2 sound [num] - установить номер мелодии для будильника 2");
+    Serial.println("\n  set al 1 [HH:MM] / sal1 [HH:MM] - время будильника 1");
+    Serial.println("  al 1 sound [num] / a1s [num] - номер мелодии для будильника 1");
+    Serial.println("  al 1 mode [once/daily] / a1m [o/d] - режим будильника 1 (один раз/ежедневно)");
+        Serial.println("  dis al 1 / da1 - отключить будильник 1");
+    Serial.println("\n  set al 2 [HH:MM] / sal2 [HH:MM] - время будильника 2");
+    Serial.println("  al 2 sound [num] / a2s [num] - номер мелодии для будильника 2");
+    Serial.println("  al 2 days [1,2,3...7] / a2d [1,2,3...7] - срабатывание буд. 2, начиная с Пн=1 по Вс=7");
+    Serial.println("  al 2 list [weekdays|weekends|all] / a2l [...] - набор дней будильника 2 (по будням, выходным, все)");
+        Serial.println("  dis al 2 / da2 - отключить будильник 2");
     
     printMappingMenuCommands();  //Управление меню
 }
@@ -366,6 +417,101 @@ void handleAlarmMenu(String command) {
         // Показать состояние будильников
         printAlarmStatus();
     }
+    else if (command.startsWith("sal1") || command.startsWith("sal2")) {
+        int alarmNum = command.startsWith("sal1") ? 1 : 2;
+        String timeStr = command.substring(4);
+        timeStr.trim();
+        if (timeStr.length() == 0) {
+            Serial.println("Нужно указать время в формате HH:MM");
+        } else {
+            if (setAlarm(alarmNum, timeStr)) {
+                // Сообщение уже выводится в setAlarm()
+            } else {
+                Serial.println("Неверный формат времени.");
+            }
+        }
+    }
+    else if (command.startsWith("a1s") || command.startsWith("a2s")) {
+        int alarmNum = command.startsWith("a1s") ? 1 : 2;
+        String numStr = command.substring(3);
+        numStr.trim();
+        if (numStr.length() == 0) {
+            Serial.println("Нужно указать номер мелодии");
+        } else {
+            int melody = numStr.toInt();
+            if (melody <= 0) {
+                Serial.println("Неверный номер мелодии (минимум 1)");
+            } else {
+                setAlarmMelody(alarmNum, static_cast<uint8_t>(melody));
+            }
+        }
+    }
+    else if (command.startsWith("a1m")) {
+        String modeStr = command.substring(3);
+        modeStr.trim();
+        modeStr.toLowerCase();
+        if (modeStr == "once") {
+            setAlarmOnceMode(1, true);
+        } else if (modeStr == "daily") {
+            setAlarmOnceMode(1, false);
+        } else {
+            Serial.println("Нужно указать once или daily");
+        }
+    }
+    else if (command.startsWith("a2d")) {
+        String daysStr = command.substring(3);
+        daysStr.trim();
+        if (daysStr.length() == 0) {
+            Serial.println("Нужно указать дни в виде списка (1-7), например: 1,3,5,7");
+        } else {
+            uint8_t mask = parseDaysMask(daysStr);
+            if (!containsDayDigits(daysStr)) {
+                Serial.println("Неверный формат. Используйте дни 1-7, например: 1,3,5,7");
+            } else if (mask == 0) {
+                Serial.println("Список дней пуст. Укажите дни 1-7");
+            } else {
+                setAlarmDaysMask(2, mask);
+            }
+        }
+    }
+    else if (command.startsWith("a2l")) {
+        String daysStr = command.substring(3);
+        daysStr.trim();
+        if (daysStr.length() == 0) {
+            Serial.println("Нужно указать: weekdays, weekends или all");
+        } else if (!isDaysKeyword(daysStr) && !containsDayDigits(daysStr)) {
+            Serial.println("Неверный формат. Используйте weekdays/weekends/all или список 1-7");
+        } else {
+            uint8_t mask = parseDaysMask(daysStr);
+            if (mask == 0) {
+                Serial.println("Список дней пуст. Укажите дни 1-7 или presets");
+            } else {
+                setAlarmDaysMask(2, mask);
+            }
+        }
+    }
+        else if (command.startsWith("da1") || command.startsWith("da2")) {
+            int alarmNum = command.startsWith("da1") ? 1 : 2;
+            if (disableAlarm(alarmNum)) {
+                // Сообщение уже выводится в disableAlarm()
+            } else {
+                Serial.println("Не удалось отключить будильник");
+            }
+        }
+        else if (command.startsWith("dis al ")) {
+            String numStr = command.substring(7);
+            numStr.trim();
+            int alarmNum = numStr.toInt();
+            if (alarmNum < 1 || alarmNum > 2) {
+                Serial.println("Неверный номер будильника (1 или 2)");
+            } else {
+                if (disableAlarm(alarmNum)) {
+                    // Сообщение уже выводится в disableAlarm()
+                } else {
+                    Serial.println("Не удалось отключить будильник");
+                }
+            }
+        }
     else if (command.startsWith("set al ")) {
         String args = command.substring(7);
         args.trim();
@@ -383,10 +529,10 @@ void handleAlarmMenu(String command) {
             }
             else {
                 if (setAlarm(alarmNum, timeStr)) {
-                    Serial.printf("Будильник %d установлен на %s\n", alarmNum, timeStr.c_str());
+                    // Сообщение уже выводится в setAlarm()
                 }
                 else {
-                    Serial.println("Неверный формат времени. Используйте HH:MM");
+                    Serial.println("Неверный формат времени.");
                 }
             }
         }
@@ -403,8 +549,69 @@ void handleAlarmMenu(String command) {
         }
         else {
             action.trim();
-            if (action.startsWith("sound ")) {
-                Serial.println("Установка мелодии ещё не реализована");
+            if (action.startsWith("sound")) {
+                String numStr = action.substring(5);
+                numStr.trim();
+                if (numStr.length() == 0) {
+                    Serial.println("Нужно указать номер мелодии");
+                } else {
+                    int melody = numStr.toInt();
+                    if (melody <= 0) {
+                        Serial.println("Неверный номер мелодии (минимум 1)");
+                    } else {
+                        setAlarmMelody(alarmNum, static_cast<uint8_t>(melody));
+                    }
+                }
+            }
+            else if (action.startsWith("mode")) {
+                String modeStr = action.substring(4);
+                modeStr.trim();
+                modeStr.toLowerCase();
+                if (alarmNum != 1) {
+                    Serial.println("Режим once/daily доступен только для будильника 1");
+                } else if (modeStr == "once") {
+                    setAlarmOnceMode(1, true);
+                } else if (modeStr == "daily") {
+                    setAlarmOnceMode(1, false);
+                } else {
+                    Serial.println("Нужно указать once или daily");
+                }
+            }
+            else if (action.startsWith("days")) {
+                String daysStr = action.substring(4);
+                daysStr.trim();
+                if (alarmNum != 2) {
+                    Serial.println("Дни недели доступны только для будильника 2");
+                } else if (daysStr.length() == 0) {
+                    Serial.println("Нужно указать дни в виде списка (1-7), например: 1,3,5,7");
+                } else {
+                    uint8_t mask = parseDaysMask(daysStr);
+                    if (!containsDayDigits(daysStr)) {
+                        Serial.println("Неверный формат. Используйте дни 1-7, например: 1,3,5,7");
+                    } else if (mask == 0) {
+                        Serial.println("Список дней пуст. Укажите дни 1-7");
+                    } else {
+                        setAlarmDaysMask(2, mask);
+                    }
+                }
+            }
+            else if (action.startsWith("list")) {
+                String daysStr = action.substring(4);
+                daysStr.trim();
+                if (alarmNum != 2) {
+                    Serial.println("Дни недели доступны только для будильника 2");
+                } else if (daysStr.length() == 0) {
+                    Serial.println("Нужно указать: weekdays, weekends или all");
+                } else if (!isDaysKeyword(daysStr) && !containsDayDigits(daysStr)) {
+                    Serial.println("Неверный формат. Используйте weekdays/weekends/all или список 1-7");
+                } else {
+                    uint8_t mask = parseDaysMask(daysStr);
+                    if (mask == 0) {
+                        Serial.println("Список дней пуст. Укажите дни 1-7 или presets");
+                    } else {
+                        setAlarmDaysMask(2, mask);
+                    }
+                }
             }
             else if (action.equals("enable") || action.equals("on")) {
                 if (enableAlarm(alarmNum)) Serial.printf("Будильник %d включён\n", alarmNum);
@@ -543,13 +750,14 @@ void printInfoMenu() {
     Serial.printf("Версия ПО: %s\n", FIRMWARE_VERSION);
     Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
 //  Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
-    Serial.printf("Источник времени: %s\n", 
+    Serial.printf("Источник времени: %s", 
                currentTimeSource == EXTERNAL_DS3231 ? "DS3231" : "Внутренний RTC");
-   
+        printDS3231Temperature();   // Температура DS3231
+
     Serial.printf("\nWiFi SSID: %s\n", config.wifi_ssid);
     Serial.printf("NTP сервер: %s\n", config.ntp_server);
 
-    printDS3231Temperature();   // Температура DS3231
+    
 
     Serial.println("\n\n=== Информация о ESP32 ===");
     
@@ -562,14 +770,18 @@ void printInfoMenu() {
     Serial.printf("Revision: %d\n", ESP.getChipRevision());
     
     // Информация о флеш памяти
-    Serial.printf("Flash Size: %d MB\n", ESP.getFlashChipSize() / (1024 * 1024));
-    Serial.printf("Flash usage: %.1f%%\n", 
-              (ESP.getSketchSize() * 100.0) / ESP.getFlashChipSize());
-    double sketchMB = ESP.getSketchSize() / (1024.0 * 1024.0);
-    double freeMB = ESP.getFreeSketchSpace() / (1024.0 * 1024.0);
-    Serial.printf("Sketch size: %.2f MB\n", sketchMB);
-    Serial.printf("Free space: %.2f MB\n", freeMB);
+    uint32_t flashSize = ESP.getFlashChipSize();
+    uint32_t sketchSize = ESP.getSketchSize();
+    uint32_t freeSketch = ESP.getFreeSketchSpace();
+    uint32_t appPartition = sketchSize + freeSketch;
 
+    Serial.printf("\nFlash Size: %d MB\n", flashSize / (1024 * 1024));
+    Serial.printf("App partition size: %.2f MB\n", appPartition / (1024.0 * 1024.0));
+    Serial.printf("Sketch size: %.2f MB\n", sketchSize / (1024.0 * 1024.0));
+    Serial.printf("App free space: %.2f MB\n", freeSketch / (1024.0 * 1024.0));
+
+    Serial.printf("App usage: %.1f%%\n", (sketchSize * 100.0) / appPartition);
+    
     printMappingMenuCommands();  //Управление меню    
     
 }
@@ -584,11 +796,49 @@ void handleInfoMenu(String command) {
 // ======================= МЕНЮ КОНФИГУРАЦИИ (уровень 2) =======================
 
 void printConfigMenu() {
-    Serial.println("\n=== УПРАВЛЕНИЕ КОНФИГУРАЦИЕЙ ===");
-    Serial.println("\nКоманды:");
-    Serial.println("   show     - Показать текущую конфигурацию");
-    Serial.println("   save     - Сохранить конфигурацию");
-    Serial.println("   default  - Сбросить к настройкам по умолчанию");
+    Serial.println("\n=== ТЕКУЩАЯ КОНФИГУРАЦИЯ ===");
+    auto formatDays = [](uint8_t mask) {
+        if (mask == 0) return String("нет");
+        const char* names[7] = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
+        String out;
+        for (uint8_t i = 0; i < 7; ++i) {
+            if (mask & (1 << i)) {
+                out += names[i];
+                if (out.length() > 1) out += ", ";
+                
+            }
+        }
+        return out;
+    };
+
+    Serial.println();
+    Serial.printf("  • Сеть 1: %s\n", strlen(config.wifi_ssid) ? config.wifi_ssid : "(не установлена)");
+    Serial.printf("  • Сеть 2: %s\n", strlen(config.wifi_ssid_2) ? config.wifi_ssid_2 : "(не установлена)");
+    Serial.printf("  • NTP сервер: %s\n", strlen(config.ntp_server) ? config.ntp_server : "(не установлен)");
+    Serial.printf("  • Часовой пояс: %s\n", strlen(config.time_config.timezone_name) ? config.time_config.timezone_name : "(не установлен)");
+        Serial.printf("  • Автосинхронизация по UTC: %s\n", 
+                      config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
+    if (config.time_config.automatic_localtime && config.time_config.auto_sync_enabled) {
+        Serial.print("  • Локальное время: ИНТЕРНЕТ + проверка актуальности таблицы\n");
+    } else if (config.time_config.automatic_localtime && !config.time_config.auto_sync_enabled) {
+        Serial.print("  • Локальное время: ТАБЛИЦА (т.к. автосинхронизация отключена)\n");
+    } else {
+        Serial.print("  • Локальное время: ТАБЛИЦА / НОВОЕ ПРАВИЛО DST - если есть\n");
+    }
+    Serial.printf("  • Будильник 1: %s %02d:%02d, мелодия %d, %s\n",
+                  config.alarm1.enabled ? "ВКЛ" : "ВЫКЛ",
+                  config.alarm1.hour,
+                  config.alarm1.minute,
+                  config.alarm1.melody,
+                  config.alarm1.once ? "once" : "daily");
+    Serial.printf("  • Будильник 2: %s %02d:%02d, мелодия %d, дни: %s\n",
+                  config.alarm2.enabled ? "ВКЛ" : "ВЫКЛ",
+                  config.alarm2.hour,
+                  config.alarm2.minute,
+                  config.alarm2.melody,
+                  formatDays(config.alarm2.days_mask).c_str());
+
+    Serial.println("\n   default  - Сбросить к настройкам по умолчанию");
 
     printMappingMenuCommands();  //Управление меню
 }
@@ -598,13 +848,7 @@ void handleConfigMenu(String command) {
     else if (command.equals("default")) {
         setDefaultConfig();
         saveConfig();
-    }
-    else if (command.equals("save")) {
-        saveConfig();
-        Serial.println("Конфигурация сохранена");
-    }
-    else if (command.equals("show")) {
-        printSettings();
+        printConfigMenu();
     }
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
@@ -616,10 +860,10 @@ void handleConfigMenu(String command) {
 void printQuickHelp() {
     Serial.println("\n=== ОСНОВНЫЕ КОМАНДЫ ===");
 
-    Serial.println("  time, t     - Текущее время");
+    Serial.println("  time / t     - Текущее время");
     Serial.println("  sync        - Синхронизировать с NTP");
-    Serial.println("  menu, m     - Главное меню");
-    Serial.println("  help, ?     - Это сообщение");
+    Serial.println("  menu / m     - Главное меню");
+    Serial.println("  help / ?     - Это сообщение");
     Serial.println("==========================\n");
 }
 
@@ -790,7 +1034,6 @@ void enableAutoSync() {
     config.time_config.auto_sync_enabled = true;
     saveConfig();
     Serial.println("\nАвтоматическая синхронизация времени ВКЛЮЧЕНА");
-    Serial.printf("Интервал синхронизации: %d часов\n", config.time_config.sync_interval_hours);
 }
 
 void disableAutoSync() {
@@ -802,7 +1045,7 @@ void disableAutoSync() {
 
 void printMappingMenuCommands() {
     Serial.println("\nНавигация:");
-    Serial.println("  menu, m      - Главное меню");
-    Serial.println("  out, o       - Выход из режима настройки");
+    Serial.println("  menu / m      - Главное меню");
+    Serial.println("  out / o       - Выход из режима настройки");
     Serial.println("==========================\n");
 }

@@ -34,7 +34,7 @@ static void printClockTypeMenu() {
     Serial.println("Vert          - Вертикальные механические разряды");
     Serial.println("Mech 2        - Классическая механика на 2 стрелки");
     Serial.println("Mech pend     - Маятниковая механика");
-    Serial.println("back, b       - Назад в инженерное меню");
+    Serial.println("back / b       - Назад в инженерное меню");
     Serial.println();
     Serial.print("> ");
 }

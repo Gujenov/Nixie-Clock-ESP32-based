@@ -5,6 +5,7 @@
 #include "menu_manager.h"  // Теперь меню отдельно
 #include "time_utils.h"
 #include "alarm_handler.h"
+#include "dfplayer_manager.h"
 
 static bool sqwFailed = false;
 extern bool printEnabled;
@@ -17,11 +18,13 @@ void setup() {
     initNTPClient();
     checkTimeSource(); 
     printDS3231Temperature();
+
+    initDFPlayer();
     
     syncTime();
     
     Serial.print("\n\n=== Система готова ===");
-    Serial.println("\n\nhelp,? - Перечень доступных команд");
+    Serial.println("\n\nhelp / ? - Перечень доступных команд");
     
     // Инициализация меню (флаги уже инициализированы в menu_manager.cpp)
     printEnabled = true;
@@ -103,7 +106,7 @@ void processSecondTick() {
     
     // Синхронизация
     static uint8_t lastSyncHour = 255;
-    if ((local_tm_info.tm_hour == 0 || local_tm_info.tm_hour == 12) && local_tm_info.tm_min == 5) {
+    if ((local_tm_info.tm_hour == 3 || local_tm_info.tm_hour == 15) && local_tm_info.tm_min == 5) {
         if (local_tm_info.tm_hour != lastSyncHour) {
             syncTime();
             lastSyncHour = local_tm_info.tm_hour;

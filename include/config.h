@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260121"
+#define FIRMWARE_VERSION "1.A0.3.260123"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -14,6 +14,12 @@
 
 // Конфигурация пинов
 #define LED_PIN 48
+
+// DFPlayer Mini (UART)
+// Настройте под вашу проводку
+#define DFPLAYER_TX_PIN 18  // ESP32 TX -> DFPlayer RX
+#define DFPLAYER_RX_PIN 19  // ESP32 RX -> DFPlayer TX
+#define DFPLAYER_BUSY_PIN -1 // -1 если не используется
 
 // Настройки таймера
 #define TIMER_DIVIDER 80
@@ -33,6 +39,9 @@ struct AlarmSettings {
     uint8_t hour;
     uint8_t minute;
     bool enabled;
+    uint8_t melody;  // Номер мелодии (трек DF player)
+    uint8_t days_mask; // Биты дней недели для будильника 2 (Пн=0 .. Вс=6)
+    bool once;         // Для будильника 1: одноразовый
 };
 
 enum ClockType : uint8_t {
@@ -68,7 +77,6 @@ struct TimeConfig {
     
     // === СИНХРОНИЗАЦИЯ ===
     bool auto_sync_enabled;           // Автосинхронизация с NTP разрешена
-    uint8_t sync_interval_hours;      // Интервал синхронизации (часы)
     uint32_t last_ntp_sync;           // Время последней NTP синхронизации (UNIX time)
     uint32_t last_dcf77_sync;         // Время последней DCF77 синхронизации
     uint8_t sync_failures;            // Счётчик неудачных синхронизаций
@@ -82,14 +90,6 @@ struct TimeConfig {
     bool manual_time_set;             // Время было установлено вручную
     bool dcf77_enabled;               // Включить/выключить DCF77 приёмник
     
-    // === УСТАРЕВШИЕ ПОЛЯ (для совместимости, будут удалены) ===
-    int8_t manual_offset;             // Deprecated: использовать timezone_name + preset
-    bool dst_enabled;                 // Deprecated: DST определяется автоматически
-    bool dst_active;                  // Deprecated: использовать current_dst_active
-    bool auto_timezone;               // Deprecated: переименовано в automatic_localtime
-    bool auto_dst;                    // Deprecated: DST теперь всегда автоматический
-    bool location_detected;           // Deprecated: больше не используется
-    char detected_tz[32];             // Deprecated: больше не используется
 };
 
 struct Config {

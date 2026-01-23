@@ -57,6 +57,13 @@ void initConfiguration() {
     if (config.clock_type > CLOCK_TYPE_MECH_PEND) {
       config.clock_type = CLOCK_TYPE_NIXIE;
     }
+
+    // Инициализация новых полей будильников
+    if (config.alarm1.melody == 0) config.alarm1.melody = 1;
+    if (config.alarm2.melody == 0) config.alarm2.melody = 1;
+    if (config.alarm1.days_mask == 0) config.alarm1.days_mask = 0x7F;
+    if (config.alarm2.days_mask == 0) config.alarm2.days_mask = 0x7F;
+    // alarm1.once по умолчанию = false
     
     // Пересохраняем с новым размером
     preferences.putBytes("data", &config, sizeof(config));
@@ -68,6 +75,12 @@ void initConfiguration() {
   }
   
   preferences.end();
+
+  // Гарантируем корректные значения новых полей
+  if (config.alarm1.melody == 0) config.alarm1.melody = 1;
+  if (config.alarm2.melody == 0) config.alarm2.melody = 1;
+  if (config.alarm1.days_mask == 0) config.alarm1.days_mask = 0x7F;
+  if (config.alarm2.days_mask == 0) config.alarm2.days_mask = 0x7F;
 
   initNTPClient();
 }
@@ -91,7 +104,13 @@ void updateNTPServer(const char* server) {
 }
 
 void setDefaultConfig() {
-    memset(&config, 0, sizeof(config));
+  char saved_serial[sizeof(config.serial_number)];
+  strlcpy(saved_serial, config.serial_number, sizeof(saved_serial));
+
+  ClockType saved_clock_type = config.clock_type;
+  uint8_t saved_clock_digits = config.clock_digits;
+
+  memset(&config, 0, sizeof(config));
     
     // WiFi
     strlcpy(config.wifi_ssid, "Hogwarts-2.4", sizeof(config.wifi_ssid));  // Первая сеть
@@ -110,7 +129,6 @@ void setDefaultConfig() {
     
     // Синхронизация
     config.time_config.auto_sync_enabled = true;
-    config.time_config.sync_interval_hours = 12;  // Синхронизировать каждые 12 часов
     config.time_config.last_ntp_sync = 0;         // Никогда не синхронизировались
     config.time_config.last_dcf77_sync = 0;
     config.time_config.sync_failures = 0;
@@ -136,25 +154,28 @@ void setDefaultConfig() {
     config.time_config.manual_time_set = false;
     config.time_config.dcf77_enabled = true;      // DCF77 включён
     
-    // Устаревшие поля (для совместимости)
-    config.time_config.manual_offset = DEFAULT_TIMEZONE_OFFSET;
-    config.time_config.dst_enabled = false;
-    config.time_config.dst_active = false;
-    config.time_config.auto_timezone = true;
-    config.time_config.auto_dst = false;
-    config.time_config.location_detected = false;
-    config.time_config.detected_tz[0] = '\0';
-    
-    // Системные
-    strlcpy(config.serial_number, "NC111115861", sizeof(config.serial_number));
+    // Системные (серийный номер не сбрасываем)
+    if (saved_serial[0] != '\0') {
+      strlcpy(config.serial_number, saved_serial, sizeof(config.serial_number));
+    } else {
+      strlcpy(config.serial_number, "NC111115861", sizeof(config.serial_number));
+    }
 
-    // Тип часов и количество разрядов
-    config.clock_type = CLOCK_TYPE_NIXIE;
-    config.clock_digits = 6;
+    // Тип часов и количество разрядов (не сбрасываем)
+    if (saved_clock_type <= CLOCK_TYPE_MECH_PEND) {
+      config.clock_type = saved_clock_type;
+    } else {
+      config.clock_type = CLOCK_TYPE_NIXIE;
+    }
+    if (saved_clock_digits >= 1 && saved_clock_digits <= 6) {
+      config.clock_digits = saved_clock_digits;
+    } else {
+      config.clock_digits = 6;
+    }
     
     // Будильники
-    config.alarm1 = {0, 0, false};
-    config.alarm2 = {0, 0, false};
+    config.alarm1 = {0, 0, false, 1, 0x7F, false};
+    config.alarm2 = {0, 0, false, 1, 0x7F, false};
     
     saveConfig();
     Serial.print("\n[SYSTEM] Установлены настройки по умолчанию\n");

@@ -27,7 +27,6 @@ struct TimeConfig {
     
     // === СИНХРОНИЗАЦИЯ ===
     bool auto_sync_enabled;
-    uint8_t sync_interval_hours;
     uint32_t last_ntp_sync;
     // ...
 };
@@ -261,12 +260,6 @@ Serial.printf("UTC%+d, DST: %s\n",
 
 ```cpp
 // DEPRECATED - не использовать!
-int8_t manual_offset;          → используйте timezone_name + preset
-bool dst_enabled;              → DST теперь всегда автоматический
-bool dst_active;               → используйте current_dst_active
-bool auto_timezone;            → переименовано в automatic_localtime
-bool location_detected;        → больше не используется
-char detected_tz[32];          → больше не используется
 ```
 
 ### Переход на новую систему:

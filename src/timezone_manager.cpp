@@ -368,7 +368,7 @@ bool compareDSTRulesWithEzTime(const TimezonePreset* preset, int startYear, int 
 bool initTimezone() {
     // Настраиваем ezTime NTP сервер и интервал
     setServer(String(config.ntp_server));
-    setInterval(config.time_config.sync_interval_hours * 3600);
+    setInterval(12 * 3600);
     
     // Проверяем, что локация задана
     if (config.time_config.timezone_name[0] == '\0') {
@@ -596,7 +596,7 @@ bool setTimezone(const char* tz_name) {
     strncpy(config.time_config.timezone_name, tz_name, sizeof(config.time_config.timezone_name));
     config.time_config.timezone_name[sizeof(config.time_config.timezone_name)-1] = '\0';
     
-    Serial.printf("\n[TZ] Установлена локация: %s", preset->display_name);
+    Serial.printf("\n[TZ] Пресет локации найден в таблице: %s", preset->display_name);
 
     // Любая неручная зона включает автоматический режим и автосинхронизацию
     if (strcmp(tz_name, "MANUAL") != 0) {
@@ -669,8 +669,13 @@ void printTimezoneInfo() {
     }
 
     Serial.printf("\n║ Автосинхронизация по UTC: %s", config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
-    Serial.printf("\n║ Локальное время: %s",
-                  config.time_config.automatic_localtime ? "ИНТЕРЕНЕТ + проверка актуальности таблицы" : "ТАБЛИЦА / НОВОЕ ПРАВИЛО DST - если есть");
+    if (config.time_config.automatic_localtime && config.time_config.auto_sync_enabled) {
+        Serial.print("\n║ Локальное время: ИНТЕРНЕТ + проверка актуальности таблицы");
+    } else if (config.time_config.automatic_localtime && !config.time_config.auto_sync_enabled) {
+        Serial.print("\n║ Локальное время: ТАБЛИЦА ( т.к. автосинхронизация отключена)");
+    } else {
+        Serial.print("\n║ Локальное время: ТАБЛИЦА / НОВОЕ ПРАВИЛО DST - если есть");
+    }
     
     Serial.print("\n╚═══════════════════════════════════════════════════════\n");
 }
