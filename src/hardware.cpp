@@ -80,7 +80,7 @@ void printDS3231Temperature() {
     
     float temp = getDS3231Temperature();
     if (temp > -100.0) { // Проверяем не код ошибки ли
-        Serial.printf("\nТемпература DS3231: %.1f°C", temp);
+        Serial.printf("\n[DS3231] Температура: %.1f°C", temp);
     } else {
         Serial.print("\n[ERR] Ошибка чтения температуры DS3231");
     }

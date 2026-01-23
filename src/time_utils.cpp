@@ -225,12 +225,12 @@ bool syncTime(bool force) {
     
     // Проверяем, инициализирован ли timeClient
     if (!timeClient) {
-        Serial.print("\n\n[NTP] Ошибка: timeClient не инициализирован");
+        Serial.print("\n\n[SYNC] Ошибка: timeClient не инициализирован");
         return false;
     }
     
     digitalWrite(LED_PIN, HIGH);
-    Serial.print("\n\n[NTP] Попытка синхронизации...");
+    Serial.print("\n\n[SYNC] Попытка синхронизации...");
     
     bool success = false;
     bool wifi_connected = false;
@@ -293,7 +293,7 @@ bool syncTime(bool force) {
     
     // 4. Если не удалось подключиться ни к одной сети
     if (!wifi_connected) {
-        Serial.print("\n[NTP] Ошибка: не удалось подключиться ни к одной WiFi сети");
+        Serial.print("\n[WIFI] Ошибка: не удалось подключиться ни к одной WiFi сети");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
         if (config.time_config.automatic_localtime &&
             config.time_config.tz_posix[0] != '\0' &&
@@ -576,7 +576,7 @@ bool syncTime(bool force) {
     
     if (!success) {
         blinkError(11);
-        Serial.print("\n[NTP] Не удалось синхронизировать время!");
+        Serial.print("\n[SYNC] Не удалось синхронизировать время!");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
         if (config.time_config.automatic_localtime &&
             config.time_config.tz_posix[0] != '\0' &&
@@ -584,7 +584,7 @@ bool syncTime(bool force) {
             Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
         }
     } else {
-        Serial.println("\n[NTP] Синхронизация успешна!");
+        Serial.println("\n[SYNC] Синхронизация успешна!");
     }
     
     return success;

@@ -35,6 +35,15 @@ struct AlarmSettings {
     bool enabled;
 };
 
+enum ClockType : uint8_t {
+    CLOCK_TYPE_NIXIE = 0,
+    CLOCK_TYPE_NIXIE_HAND,
+    CLOCK_TYPE_CYCLOTRON,
+    CLOCK_TYPE_VERTICAL,
+    CLOCK_TYPE_MECH_2,
+    CLOCK_TYPE_MECH_PEND
+};
+
 
 struct TimeConfig {
     // === ОСНОВНАЯ НАСТРОЙКА ===
@@ -96,6 +105,10 @@ struct Config {
     
     // Системные настройки
     char serial_number[12];
+
+    // Тип часов и количество разрядов
+    ClockType clock_type;
+    uint8_t clock_digits;
     
     // Будильники
     AlarmSettings alarm1;

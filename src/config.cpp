@@ -49,6 +49,14 @@ void initConfiguration() {
       config.time_config.tz_posix_zone[0] = '\0';
       config.time_config.tz_posix_updated = 0;
     }
+
+    // Инициализация настроек типа часов
+    if (config.clock_digits == 0 || config.clock_digits > 6) {
+      config.clock_digits = 6;
+    }
+    if (config.clock_type > CLOCK_TYPE_MECH_PEND) {
+      config.clock_type = CLOCK_TYPE_NIXIE;
+    }
     
     // Пересохраняем с новым размером
     preferences.putBytes("data", &config, sizeof(config));
@@ -139,6 +147,10 @@ void setDefaultConfig() {
     
     // Системные
     strlcpy(config.serial_number, "NC111115861", sizeof(config.serial_number));
+
+    // Тип часов и количество разрядов
+    config.clock_type = CLOCK_TYPE_NIXIE;
+    config.clock_digits = 6;
     
     // Будильники
     config.alarm1 = {0, 0, false};

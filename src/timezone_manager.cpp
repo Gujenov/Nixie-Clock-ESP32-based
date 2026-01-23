@@ -18,7 +18,8 @@ static const TimezonePreset TIMEZONE_PRESETS[] = {
     {"CET", "Центральноевропейское (CET)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
     {"Europe/London", "Лондон (GMT/BST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
     {"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
-  //{"Europe/Warsaw", "Варшава (CET/CEST)", 1, 2, 3, 5, 0, 2, 10, 5, 0, 3},
+  //{"Europe/Warsaw", "Варшава (CET/CEST)", 2, 3, 3, 4, 0, 2, 10, 5, 0, 3}, //TEST
+    
 
     // Западноевропейское время (WET/WEST) - UTC+0/+1
     {"Europe/Lisbon", "Лиссабон (WET/WEST)", 0, 1, 3, 5, 0, 1, 10, 5, 0, 2},
@@ -121,25 +122,42 @@ uint8_t getPresetsCount() {
 
 // ========== ВЫЧИСЛЕНИЕ DST ==========
 
+// UTC-safe расчёты (не зависят от TZ системы)
+static int64_t daysFromCivil(int y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    const int era = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = static_cast<unsigned>(y - era * 400);
+    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + static_cast<int>(doe) - 719468;
+}
+
+static int weekdayFromCivil(int y, unsigned m, unsigned d) {
+    int64_t days = daysFromCivil(y, m, d);
+    int wday = static_cast<int>((days + 4) % 7); // 1970-01-01 = Thu (4)
+    if (wday < 0) wday += 7;
+    return wday;
+}
+
+static unsigned daysInMonth(int year, unsigned month) {
+    int next_year = (month == 12) ? (year + 1) : year;
+    unsigned next_month = (month == 12) ? 1 : (month + 1);
+    int64_t last_day = daysFromCivil(next_year, next_month, 1) - daysFromCivil(year, month, 1);
+    return static_cast<unsigned>(last_day);
+}
+
+static time_t makeUtcTime(int year, int month, int day, int hour, int minute, int second) {
+    int64_t days = daysFromCivil(year, static_cast<unsigned>(month), static_cast<unsigned>(day));
+    int64_t secs = days * 86400 + hour * 3600 + minute * 60 + second;
+    return static_cast<time_t>(secs);
+}
+
 // Вычисляет timestamp перехода на/с DST
 time_t calculateDSTTransition(int year, uint8_t month, uint8_t week, uint8_t dow, uint8_t hour, int8_t offset) {
     if (month == 0) return 0;  // Нет DST
     
-    // Создаём struct tm для первого дня указанного месяца
-    struct tm tm_time = {0};
-    tm_time.tm_year = year - 1900;
-    tm_time.tm_mon = month - 1;
-    tm_time.tm_mday = 1;
-    tm_time.tm_hour = hour;
-    tm_time.tm_min = 0;
-    tm_time.tm_sec = 0;
-    tm_time.tm_isdst = -1;
-    
-    time_t first_day = mktime(&tm_time);
-    struct tm* first = gmtime(&first_day);
-    
     // Определяем день недели первого дня месяца (0=Sun, 1=Mon, ...)
-    int first_dow = first->tm_wday;
+    int first_dow = weekdayFromCivil(year, month, 1);
     
     // Вычисляем первое вхождение нужного дня недели
     int days_until_target = (dow - first_dow + 7) % 7;
@@ -152,23 +170,14 @@ time_t calculateDSTTransition(int year, uint8_t month, uint8_t week, uint8_t dow
         // week == 5 означает "последняя неделя месяца"
         // Находим последнее вхождение дня недели
         target_day += 3 * 7;  // Начинаем с 4-й недели
-        
-        // Проверяем, есть ли ещё одна неделя
-        tm_time.tm_mday = target_day + 7;
-        time_t test_time = mktime(&tm_time);
-        struct tm* test = gmtime(&test_time);
-        
-        if (test->tm_mon == month - 1) {
+        unsigned dim = daysInMonth(year, month);
+        if (target_day + 7 <= static_cast<int>(dim)) {
             target_day += 7;  // Да, есть 5-я неделя
         }
     }
     
-    // Создаём финальный timestamp
-    tm_time.tm_mday = target_day;
-    tm_time.tm_hour = hour;
-    
-    // Применяем смещение часового пояса (переход происходит в местном времени)
-    time_t transition = mktime(&tm_time) - (offset * 3600);
+    // Создаём финальный timestamp (локальное время -> UTC)
+    time_t transition = makeUtcTime(year, month, target_day, hour, 0, 0) - (offset * 3600);
     
     return transition;
 }
@@ -209,17 +218,6 @@ static bool getEzTimeDstState(time_t utc, bool &isdst, int16_t &offset_minutes) 
     return tzname.length() > 0;
 }
 
-static time_t makeUtcTime(int year, int month, int day, int hour, int minute, int second) {
-    struct tm tm_time = {0};
-    tm_time.tm_year = year - 1900;
-    tm_time.tm_mon = month - 1;
-    tm_time.tm_mday = day;
-    tm_time.tm_hour = hour;
-    tm_time.tm_min = minute;
-    tm_time.tm_sec = second;
-    tm_time.tm_isdst = 0;
-    return mktime(&tm_time);
-}
 
 static void sortTransitions(time_t *arr, uint8_t count) {
     for (uint8_t i = 0; i + 1 < count; ++i) {
