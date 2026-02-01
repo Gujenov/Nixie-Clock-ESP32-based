@@ -13,13 +13,14 @@ extern bool printEnabled;
 void processSecondTick();
 
 void setup() {
+    delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
     initConfiguration();
     initNTPClient();
     checkTimeSource(); 
     printDS3231Temperature();
 
-    initDFPlayer();
+    // initDFPlayer(); // временно отключено для теста
     
     syncTime();
     
@@ -78,7 +79,12 @@ void loop() {
 }
 
 void processSecondTick() {
+    static time_t lastProcessedUtc = 0;
     time_t currentTime = getCurrentUTCTime();
+    if (currentTime == lastProcessedUtc) {
+        return;
+    }
+    lastProcessedUtc = currentTime;
     time_t localTime = utcToLocal(currentTime);
     
     struct tm* tm_info = gmtime(&currentTime);

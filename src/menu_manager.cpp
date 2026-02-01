@@ -642,7 +642,9 @@ void printWifiMenu() {
     Serial.println("\nТекущие параметры:");
     Serial.printf("  WiFi SSID (сеть 1): %s\n", strlen(config.wifi_ssid) > 0 ? config.wifi_ssid : "(не установлено)");
     Serial.printf("  WiFi SSID (сеть 2, резервная): %s\n", strlen(config.wifi_ssid_2) > 0 ? config.wifi_ssid_2 : "(не установлено)");
-    Serial.printf("  NTP сервер: %s\n", config.ntp_server);
+    Serial.printf("  NTP сервер 1: %s\n", config.ntp_server_1);
+    Serial.printf("  NTP сервер 2: %s\n", config.ntp_server_2);
+    Serial.printf("  NTP сервер 3: %s\n", config.ntp_server_3);
     if (config.time_config.last_ntp_sync) {
         time_t t = (time_t)config.time_config.last_ntp_sync;
         struct tm tm;
@@ -656,7 +658,9 @@ void printWifiMenu() {
     Serial.println("  wifi scan     - Сканировать доступные сети");
     Serial.println("  wifi [SSID] [PASSWORD] - Данные основной сети WIFI (сеть 1)");
     Serial.println("  wifi2 [SSID] [PASSWORD] - Данные резервной сети WIFI (сеть 2)");
-    Serial.println("  set ntp <SERVER> - Задать NTP сервер");
+    Serial.println("  set ntp1 <SERVER> - Задать NTP сервер 1");
+    Serial.println("  set ntp2 <SERVER> - Задать NTP сервер 2");
+    Serial.println("  set ntp3 <SERVER> - Задать NTP сервер 3");
 
     printMappingMenuCommands();  //Управление меню
 }
@@ -717,20 +721,33 @@ void handleWifiMenu(String command) {
             Serial.println("WiFi настройки сохранены во flash");
         }
     }
-    else if (command.startsWith("set ntp ")) {
-        String server = command.substring(8);
+    else if (command.startsWith("set ntp1 ") || command.startsWith("set ntp2 ") || command.startsWith("set ntp3 ") || command.startsWith("set ntp ")) {
+        uint8_t index = 1;
+        String server;
+
+        if (command.startsWith("set ntp1 ")) {
+            index = 1;
+            server = command.substring(9);
+        } else if (command.startsWith("set ntp2 ")) {
+            index = 2;
+            server = command.substring(9);
+        } else if (command.startsWith("set ntp3 ")) {
+            index = 3;
+            server = command.substring(9);
+        } else {
+            index = 1;
+            server = command.substring(8);
+        }
+
         server.trim();
-        strncpy(config.ntp_server, server.c_str(), sizeof(config.ntp_server) - 1);
-        config.ntp_server[sizeof(config.ntp_server) - 1] = '\0';
-        saveConfig();
-        Serial.printf("NTP сервер установлен на: %s\n", config.ntp_server);
+        updateNTPServer(index, server.c_str());
 
         // Если WiFi ещё не настроен, уведомляем и не пытаемся синхронизировать
         if (strlen(config.wifi_ssid) == 0) {
             Serial.println("\nWiFi не настроен, синхронизация NTP невозможна (установите WiFi)");
         } else {
-            Serial.print("Пытаюсь синхронизироваться с новым NTP сервером...");
-            if (syncTime(true)) {
+            Serial.print("\nПытаюсь синхронизироваться с новым NTP сервером...");
+            if (syncTime(true, index)) {
                 Serial.println("\nСинхронизация NTP выполнена успешно\n");
             } else {
                 Serial.println("\nНе удалось синхронизироваться с NTP сервером\n");
@@ -755,7 +772,9 @@ void printInfoMenu() {
         printDS3231Temperature();   // Температура DS3231
 
     Serial.printf("\nWiFi SSID: %s\n", config.wifi_ssid);
-    Serial.printf("NTP сервер: %s\n", config.ntp_server);
+    Serial.printf("NTP сервер 1: %s\n", config.ntp_server_1);
+    Serial.printf("NTP сервер 2: %s\n", config.ntp_server_2);
+    Serial.printf("NTP сервер 3: %s\n", config.ntp_server_3);
 
     
 
@@ -814,7 +833,9 @@ void printConfigMenu() {
     Serial.println();
     Serial.printf("  • Сеть 1: %s\n", strlen(config.wifi_ssid) ? config.wifi_ssid : "(не установлена)");
     Serial.printf("  • Сеть 2: %s\n", strlen(config.wifi_ssid_2) ? config.wifi_ssid_2 : "(не установлена)");
-    Serial.printf("  • NTP сервер: %s\n", strlen(config.ntp_server) ? config.ntp_server : "(не установлен)");
+    Serial.printf("  • NTP сервер 1: %s\n", strlen(config.ntp_server_1) ? config.ntp_server_1 : "(не установлен)");
+    Serial.printf("  • NTP сервер 2: %s\n", strlen(config.ntp_server_2) ? config.ntp_server_2 : "(не установлен)");
+    Serial.printf("  • NTP сервер 3: %s\n", strlen(config.ntp_server_3) ? config.ntp_server_3 : "(не установлен)");
     Serial.printf("  • Часовой пояс: %s\n", strlen(config.time_config.timezone_name) ? config.time_config.timezone_name : "(не установлен)");
         Serial.printf("  • Автосинхронизация по UTC: %s\n", 
                       config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");

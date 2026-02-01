@@ -50,6 +50,17 @@ void initConfiguration() {
       config.time_config.tz_posix_updated = 0;
     }
 
+    // Инициализация новых NTP серверов (NTP2/NTP3)
+    if (config.ntp_server_1[0] == '\0') {
+      strlcpy(config.ntp_server_1, "pool.ntp.org", sizeof(config.ntp_server_1));
+    }
+    if (config.ntp_server_2[0] == '\0') {
+      strlcpy(config.ntp_server_2, "time.google.com", sizeof(config.ntp_server_2));
+    }
+    if (config.ntp_server_3[0] == '\0') {
+      strlcpy(config.ntp_server_3, "time.cloudflare.com", sizeof(config.ntp_server_3));
+    }
+
     // Инициализация настроек типа часов
     if (config.clock_digits == 0 || config.clock_digits > 6) {
       config.clock_digits = 6;
@@ -82,25 +93,60 @@ void initConfiguration() {
   if (config.alarm1.days_mask == 0) config.alarm1.days_mask = 0x7F;
   if (config.alarm2.days_mask == 0) config.alarm2.days_mask = 0x7F;
 
+  if (config.ntp_server_1[0] == '\0') {
+    strlcpy(config.ntp_server_1, "pool.ntp.org", sizeof(config.ntp_server_1));
+  }
+  if (config.ntp_server_2[0] == '\0') {
+    strlcpy(config.ntp_server_2, "time.google.com", sizeof(config.ntp_server_2));
+  }
+  if (config.ntp_server_3[0] == '\0') {
+    strlcpy(config.ntp_server_3, "time.cloudflare.com", sizeof(config.ntp_server_3));
+  }
+
   initNTPClient();
 }
 
 void initNTPClient() {
     if (!timeClient) {
-        timeClient = new NTPClient(ntpUDP, config.ntp_server, 0);
-        Serial.printf("\n[NTP] Клиент инициализирован с сервером: %s", config.ntp_server);
+    timeClient = new NTPClient(ntpUDP, config.ntp_server_1, 0);
+    Serial.printf("\n[NTP] Клиент инициализирован с сервером: %s", config.ntp_server_1);
     }
 }
 
-void updateNTPServer(const char* server) {
+void updateNTPServer(uint8_t index, const char* server) {
+  char* target = nullptr;
+  size_t targetSize = 0;
+
+  switch (index) {
+    case 1:
+      target = config.ntp_server_1;
+      targetSize = sizeof(config.ntp_server_1);
+      break;
+    case 2:
+      target = config.ntp_server_2;
+      targetSize = sizeof(config.ntp_server_2);
+      break;
+    case 3:
+      target = config.ntp_server_3;
+      targetSize = sizeof(config.ntp_server_3);
+      break;
+    default:
+      Serial.print("\n[Config] Ошибка: неверный индекс NTP сервера");
+      return;
+  }
+
+  strlcpy(target, server, targetSize);
+
+  if (index == 1) {
     if (timeClient) {
-        delete timeClient;
-        timeClient = nullptr;
+      delete timeClient;
+      timeClient = nullptr;
     }
-    strlcpy(config.ntp_server, server, sizeof(config.ntp_server));
     initNTPClient();
-    saveConfig();
-    Serial.printf("\n[Config] NTP сервер обновлён: %s", server);
+  }
+
+  saveConfig();
+  Serial.printf("\n[Config] NTP сервер %d обновлён: %s", index, server);
 }
 
 void setDefaultConfig() {
@@ -117,7 +163,9 @@ void setDefaultConfig() {
     strlcpy(config.wifi_pass, "Alohomora!", sizeof(config.wifi_pass));
     strlcpy(config.wifi_ssid_2, "Hogwarts", sizeof(config.wifi_ssid_2));  // Вторая сеть
     strlcpy(config.wifi_pass_2, "Alohomora!", sizeof(config.wifi_pass_2));
-    strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
+    strlcpy(config.ntp_server_1, "pool.ntp.org", sizeof(config.ntp_server_1));
+    strlcpy(config.ntp_server_2, "time.google.com", sizeof(config.ntp_server_2));
+    strlcpy(config.ntp_server_3, "time.cloudflare.com", sizeof(config.ntp_server_3));
     
      // Timezone settings
     strcpy(config.time_config.timezone_name, DEFAULT_TIMEZONE_NAME);  // "Europe/Warsaw"
