@@ -13,6 +13,8 @@ static bool printEnabled = false; // Флаг для управления выв
 void checkTimeSource() {
     static bool firstCheck = true;
     static bool interruptsConfigured = false;
+    static bool firstRunMessage = true;
+    static unsigned long lastProbeMillis = 0;
     
     if (firstCheck) {
         firstCheck = false;
@@ -21,28 +23,46 @@ void checkTimeSource() {
         Serial.print("\n\n[SYSTEM] Инициализация I2C завершена");
     }
     
-    // Проверка OSF (этот блок можно оставить)
+    // Если это первый запуск и DS3231 не найден
+    if (firstRunMessage && !ds3231_available && !rtc) {
+        currentTimeSource = INTERNAL_RTC;
+        Serial.print("\n✓ Используются внутренние часы RTC");
+        setDefaultTimeToAllSources();
+        setupInterrupts();
+        firstRunMessage = false;
+    }
+
+    // Не дёргаем I2C слишком часто, если DS3231 отсутствует
+    unsigned long nowMillis = millis();
+    if (!ds3231_available && (nowMillis - lastProbeMillis < 1000)) {
+        return;
+    }
+    lastProbeMillis = nowMillis;
+
     Wire.beginTransmission(0x68);
-    Wire.write(0x0F);
-    if (Wire.endTransmission() == 0) {
-        Wire.requestFrom(0x68, 1);
-        if (Wire.available()) {
-            uint8_t status = Wire.read();
-            if (status & 0x80) {
-                Serial.print("\n[DS3231] ⚠️ Флаг OSF установлен (питание пропадало)");
-                Wire.beginTransmission(0x68);
-                Wire.write(0x0F);
-                Wire.write(status & 0x7F);
-                Wire.endTransmission();
-                setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
-                Serial.print("\nПопытка синхронизировать время с NTP...");
-                syncTime(); // Пробуем синхронизировать время
+    bool ds3231_now_available = (Wire.endTransmission() == 0);
+
+    // Проверка OSF (только если DS3231 доступен)
+    if (ds3231_now_available) {
+        Wire.beginTransmission(0x68);
+        Wire.write(0x0F);
+        if (Wire.endTransmission() == 0) {
+            Wire.requestFrom(0x68, 1);
+            if (Wire.available()) {
+                uint8_t status = Wire.read();
+                if (status & 0x80) {
+                    Serial.print("\n[DS3231] ⚠️ Флаг OSF установлен (питание пропадало)");
+                    Wire.beginTransmission(0x68);
+                    Wire.write(0x0F);
+                    Wire.write(status & 0x7F);
+                    Wire.endTransmission();
+                    setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
+                    Serial.print("\nПопытка синхронизировать время с NTP...");
+                    syncTime(); // Пробуем синхронизировать время
+                }
             }
         }
     }
-    
-    Wire.beginTransmission(0x68);
-    bool ds3231_now_available = (Wire.endTransmission() == 0);
     
     bool showConnectionMessage = false;
     time_t diff = 0;
@@ -123,16 +143,6 @@ void checkTimeSource() {
         }
     }
     
-    // Если это первый запуск и DS3231 не найден
-    static bool firstRunMessage = true;
-    if (firstRunMessage && !ds3231_available && !rtc) {
-        currentTimeSource = INTERNAL_RTC;
-        Serial.print("\n✓ Используются внутренние часы RTC");
-        setDefaultTimeToAllSources();
-        setupInterrupts();
-        firstRunMessage = false;
-    }
-
 }
 
 time_t getCurrentUTCTime() {
@@ -197,7 +207,174 @@ void setTimeToAllSources(time_t utcTime) {
    // printTimeFromTimeT(utcTime);
 }
 
-bool syncTime(bool force) {
+static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled) {
+    // Проверяем, что время валидное (не 1970 год)
+    // Используем порог: 2025-07-06 09:00:00 UTC (наше значение по умолчанию)
+    if (utcTime <= 1751792400) { // После 2025-07-06 09:00 UTC
+        Serial.print("\n[NTP] Ошибка: получено некорректное время");
+        return false;
+    }
+
+    // Выводим полученное UTC время
+    struct tm *tm_utc = gmtime(&utcTime);
+    Serial.printf("\n[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d", 
+               tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
+               tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
+
+    // Устанавливаем UTC время в систему
+    struct timeval tv = { utcTime, 0 };
+    settimeofday(&tv, NULL);
+    Serial.print("\n[NTP] -> [RTC] Время записано во внутренний RTC");
+    
+    // Записываем в DS3231 ТОЖЕ UTC
+    if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
+        DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
+        rtc->adjust(rtcTime);
+        Serial.print("\n[NTP] -> [DS3231] Время записано в аппаратные часы");
+    }
+    
+    // Показываем информацию о режиме работы с часовыми поясами
+    if (config.time_config.automatic_localtime) {
+        Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
+        Serial.printf("\n[TZ] Задана локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+        
+        // Обновляем/инициализируем ezTime после подключения WiFi
+        if (setTimezone(config.time_config.timezone_name)) {
+            if (force && !auto_sync_was_enabled) {
+                config.time_config.auto_sync_enabled = false;
+            }
+            for (int i = 0; i < 5; i++) {
+                events();
+                delay(200);
+            }
+        }
+        
+        // Получаем и выводим данные от ezTime
+        int8_t eztime_offset = 0;
+        bool eztime_dst = false;
+        if (!getEzTimeData(utcTime, eztime_offset, eztime_dst)) {
+            // Fallback: используем текущую логику конвертации (может быть таблица/офлайн POSIX)
+            utcToLocal(utcTime);
+            eztime_offset = config.time_config.current_offset;
+            eztime_dst = config.time_config.current_dst_active;
+        }
+        
+        Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
+                     eztime_offset,
+                     eztime_dst ? "ON" : "OFF");
+        
+        // Сверяем с локальной таблицей
+        const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
+        if (preset) {
+            bool local_dst = calculateDSTStatus(utcTime, preset);
+            int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
+
+            bool current_match = (eztime_offset == local_offset && eztime_dst == local_dst);
+            struct tm* utc_tm = gmtime(&utcTime);
+            int year = utc_tm ? (utc_tm->tm_year + 1900) : 0;
+            bool rules_match = (year > 0) ? compareDSTRulesWithEzTime(preset, year, 2, false) : true;
+
+            if (current_match && rules_match) {
+                Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
+                if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
+                    saveConfig();
+                }
+            } else {
+                Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
+                if (!current_match) {
+                    Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
+                    Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
+                }
+                if (!rules_match) {
+                    Serial.print("\n[TZ]    Переходы DST: РАСХОЖДЕНИЕ");
+                }
+
+                if (savePosixOverride(config.time_config.timezone_name)) {
+                    saveConfig();
+                    Serial.print("\n[TZ] 💾 POSIX правила сохранены для офлайн-работы");
+                }
+            }
+        }
+    } else {
+        Serial.print("\n[TZ] Включено ручное определение локального времени.");
+        Serial.printf("\n[TZ] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
+        
+        // Получаем данные из таблицы
+        utcToLocal(utcTime);  // Это обновит current_offset и current_dst_active
+        Serial.printf("\n[TZ] Данные из таблицы: UTC%+d, DST: %s", 
+                     config.time_config.current_offset,
+                     config.time_config.current_dst_active ? "ON" : "OFF");
+    }
+    
+    // Обновляем время последней синхронизации в конфиге
+    config.time_config.last_ntp_sync = utcTime;
+    saveConfig();
+    
+    return true;
+}
+
+static const char* getNtpServerByIndex(uint8_t index) {
+    switch (index) {
+        case 1: return config.ntp_server_1;
+        case 2: return config.ntp_server_2;
+        case 3: return config.ntp_server_3;
+        default: return nullptr;
+    }
+}
+
+static bool trySyncWithNtpServers(bool force, bool auto_sync_was_enabled, uint8_t preferredIndex) {
+    uint8_t order[3];
+    uint8_t count = 0;
+
+    if (preferredIndex >= 1 && preferredIndex <= 3) {
+        order[count++] = preferredIndex;
+    }
+    for (uint8_t i = 1; i <= 3; ++i) {
+        if (i == preferredIndex) {
+            continue;
+        }
+        order[count++] = i;
+    }
+
+    for (uint8_t i = 0; i < count; ++i) {
+        const char* server = getNtpServerByIndex(order[i]);
+        if (!server || server[0] == '\0') {
+            continue;
+        }
+
+        Serial.printf("\n[NTP] Используем сервер: %s", server);
+
+        IPAddress resolvedIp;
+        if (!WiFi.hostByName(server, resolvedIp)) {
+            Serial.printf("[NTP] DNS ошибка для сервера: %s\n", server);
+            continue;
+        }
+
+        try {
+            NTPClient client(ntpUDP, resolvedIp, 0);
+            client.begin();
+            client.setTimeOffset(0); // Запрашиваем UTC
+            
+            if (client.forceUpdate()) {
+                time_t utcTime = client.getEpochTime();
+                if (applyNtpTime(utcTime, force, auto_sync_was_enabled)) {
+                    client.end();
+                    return true;
+                }
+            } else {
+                Serial.print("\n[NTP] Ошибка: forceUpdate() не удался");
+            }
+            
+            client.end();
+        } catch (...) {
+            Serial.print("\n[NTP] Исключение при синхронизации!");
+        }
+    }
+
+    return false;
+}
+
+bool syncTime(bool force, uint8_t preferredNtpIndex) {
     const bool auto_sync_was_enabled = config.time_config.auto_sync_enabled;
     // Проверяем, разрешена ли синхронизация
     if (!force && !config.time_config.auto_sync_enabled) {
@@ -306,132 +483,10 @@ bool syncTime(bool force) {
         return false;
     }
     
-    // 5. Пробуем синхронизироваться с NTP
-    try {
-        timeClient->begin();
-        timeClient->setTimeOffset(0); // Запрашиваем UTC
-        
-        if (timeClient->forceUpdate()) {
-            // Получаем UTC время
-            time_t utcTime = timeClient->getEpochTime();
-            
-            // Проверяем, что время валидное (не 1970 год)
-            // Используем порог: 2025-07-06 09:00:00 UTC (наше значение по умолчанию)
-            if (utcTime > 1751792400) { // После 2025-07-06 09:00 UTC
-                
-                // Выводим полученное UTC время
-                struct tm *tm_utc = gmtime(&utcTime);
-                Serial.printf("\n[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d", 
-                           tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
-                           tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
-
-                // Устанавливаем UTC время в систему
-                struct timeval tv = { utcTime, 0 };
-                settimeofday(&tv, NULL);
-                Serial.print("\n[NTP] -> [RTC] Время записано во внутренний RTC");
-                
-                // Записываем в DS3231 ТОЖЕ UTC
-                if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-                    DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
-                    rtc->adjust(rtcTime);
-                    Serial.print("\n[NTP] -> [DS3231] Время записано в аппаратные часы");
-                }
-                
-                // Показываем информацию о режиме работы с часовыми поясами
-                if (config.time_config.automatic_localtime) {
-                    Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
-                    Serial.printf("\n[TZ] Задана локация: %s (режим: ezTime online)", config.time_config.timezone_name);
-                    
-                    // Обновляем/инициализируем ezTime после подключения WiFi
-                    if (setTimezone(config.time_config.timezone_name)) {
-                        if (force && !auto_sync_was_enabled) {
-                            config.time_config.auto_sync_enabled = false;
-                        }
-                        for (int i = 0; i < 5; i++) {
-                            events();
-                            delay(200);
-                        }
-                    }
-                    
-                    // Сохраняем текущие значения ДО вызова utcToLocal
-                    int8_t old_offset = config.time_config.current_offset;
-                    bool old_dst = config.time_config.current_dst_active;
-                    
-                    // Получаем и выводим данные от ezTime
-                    int8_t eztime_offset = 0;
-                    bool eztime_dst = false;
-                    if (!getEzTimeData(utcTime, eztime_offset, eztime_dst)) {
-                        // Fallback: используем текущую логику конвертации (может быть таблица/офлайн POSIX)
-                        utcToLocal(utcTime);
-                        eztime_offset = config.time_config.current_offset;
-                        eztime_dst = config.time_config.current_dst_active;
-                    }
-                    
-                    Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
-                                 eztime_offset,
-                                 eztime_dst ? "ON" : "OFF");
-                    
-                    // Сверяем с локальной таблицей
-                    const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
-                    if (preset) {
-                        bool local_dst = calculateDSTStatus(utcTime, preset);
-                        int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
-
-                        bool current_match = (eztime_offset == local_offset && eztime_dst == local_dst);
-                        struct tm* utc_tm = gmtime(&utcTime);
-                        int year = utc_tm ? (utc_tm->tm_year + 1900) : 0;
-                        bool rules_match = (year > 0) ? compareDSTRulesWithEzTime(preset, year, 2, false) : true;
-
-                        if (current_match && rules_match) {
-                            Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
-                            if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
-                                saveConfig();
-                            }
-                        } else {
-                            Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
-                            if (!current_match) {
-                                Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
-                                Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
-                            }
-                            if (!rules_match) {
-                                Serial.print("\n[TZ]    Переходы DST: РАСХОЖДЕНИЕ");
-                            }
-
-                            if (savePosixOverride(config.time_config.timezone_name)) {
-                                saveConfig();
-                                Serial.print("\n[TZ] 💾 POSIX правила сохранены для офлайн-работы");
-                            }
-                        }
-                    }
-                } else {
-                    Serial.print("\n[TZ] Включено ручное определение локального времени.");
-                    Serial.printf("\n[TZ] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
-                    
-                    // Получаем данные из таблицы
-                    time_t local_time = utcToLocal(utcTime);  // Это обновит current_offset и current_dst_active
-                    Serial.printf("\n[TZ] Данные из таблицы: UTC%+d, DST: %s", 
-                                 config.time_config.current_offset,
-                                 config.time_config.current_dst_active ? "ON" : "OFF");
-                }
-                
-               
-                              
-                // Обновляем время последней синхронизации в конфиге
-                config.time_config.last_ntp_sync = utcTime;
-                saveConfig();
-                
-                success = true;
-                digitalWrite(LED_PIN, LOW);
-            } else {
-                Serial.print("\n[NTP] Ошибка: получено некорректное время");
-            }
-        } else {
-            Serial.print("\n[NTP] Ошибка: forceUpdate() не удался");
-        }
-        
-        timeClient->end();
-    } catch (...) {
-        Serial.print("\n[NTP] Исключение при синхронизации!");
+    // 5. Пробуем синхронизироваться с NTP (с учетом предпочтительного сервера)
+    success = trySyncWithNtpServers(force, auto_sync_was_enabled, preferredNtpIndex);
+    if (success) {
+        digitalWrite(LED_PIN, LOW);
     }
     
     // 6. Если не удалось через первую сеть и есть вторая - пробуем вторую
@@ -459,109 +514,10 @@ bool syncTime(bool force) {
             Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
             Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
             
-            // Пробуем синхронизироваться с NTP через вторую сеть
-            try {
-                timeClient->begin();
-                timeClient->setTimeOffset(0);
-                
-                if (timeClient->forceUpdate()) {
-                    time_t utcTime = timeClient->getEpochTime();
-                    
-                    if (utcTime > 1751792400) {
-                        // Выводим полученное UTC время
-                        struct tm *tm_utc = gmtime(&utcTime);
-                        Serial.printf("\n[NTP] Получено UTC: %04d-%02d-%02d %02d:%02d:%02d", 
-                                   tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
-                                   tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
-
-                        // Устанавливаем UTC время в систему
-                        struct timeval tv = { utcTime, 0 };
-                        settimeofday(&tv, NULL);
-                        Serial.print("\n[NTP] -> [RTC] Время записано во внутренний RTC");
-                        
-                        // Записываем в DS3231 ТОЖЕ UTC
-                        if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-                            DateTime rtcTime(utcTime);
-                            rtc->adjust(rtcTime);
-                            Serial.print("\n[NTP] -> [DS3231] Время записано в аппаратные часы");
-                        }
-                        
-                        // Показываем информацию о режиме работы с часовыми поясами
-                        if (config.time_config.automatic_localtime) {
-                            Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
-                            Serial.printf("\n[TZ] Локация: %s (режим: ezTime online)", config.time_config.timezone_name);
-                            
-                            // Обновляем/инициализируем ezTime после подключения WiFi
-                            if (setTimezone(config.time_config.timezone_name)) {
-                                if (force && !auto_sync_was_enabled) {
-                                    config.time_config.auto_sync_enabled = false;
-                                }
-                                for (int i = 0; i < 5; i++) {
-                                    events();
-                                    delay(200);
-                                }
-                            }
-                            
-                            int8_t eztime_offset = 0;
-                            bool eztime_dst = false;
-                            if (!getEzTimeData(utcTime, eztime_offset, eztime_dst)) {
-                                utcToLocal(utcTime);
-                                eztime_offset = config.time_config.current_offset;
-                                eztime_dst = config.time_config.current_dst_active;
-                            }
-                            
-                            Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
-                                         eztime_offset,
-                                         eztime_dst ? "ON" : "OFF");
-                            
-                            const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
-                            if (preset) {
-                                bool local_dst = calculateDSTStatus(utcTime, preset);
-                                int8_t local_offset = local_dst ? preset->dst_offset : preset->std_offset;
-                                
-                                // Сравниваем данные от ezTime с данными из таблицы
-                                if (eztime_offset == local_offset && eztime_dst == local_dst) {
-                                    Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
-                                    if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
-                                        saveConfig();
-                                    }
-                                } else {
-                                    Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
-                                    Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
-                                    Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
-
-                                    if (savePosixOverride(config.time_config.timezone_name)) {
-                                        saveConfig();
-                                        Serial.print("\n[TZ] 💾 POSIX правила сохранены для офлайн-работы");
-                                    }
-                                }
-                            }
-                        } else {
-                            Serial.print("\n[TZ] Включено ручное определение локального времени.");
-                            Serial.printf("\n[TZ] Локация: %s (режим: табличные данные)", config.time_config.timezone_name);
-                            
-                            time_t local_time = utcToLocal(utcTime);
-                            Serial.printf("\n[TZ] Данные из таблицы: UTC%+d, DST: %s", 
-                                         config.time_config.current_offset,
-                                         config.time_config.current_dst_active ? "ON" : "OFF");
-                        }
-                        
-                        // Обновляем время последней синхронизации
-                        config.time_config.last_ntp_sync = utcTime;
-                        saveConfig();
-                        
-                        success = true;
-                        digitalWrite(LED_PIN, LOW);
-                    } else {
-                        Serial.print("\n[NTP] Ошибка: получено некорректное время");
-                    }
-                } else {
-                    Serial.print("\n[NTP] Ошибка: forceUpdate() не удался через сеть 2");
-                }
-                
-                timeClient->end();
-            } catch (...) {
-                Serial.print("\n[NTP] Исключение при синхронизации через сеть 2!");
+            // Пробуем синхронизироваться с NTP через вторую сеть (с учетом предпочтительного сервера)
+            success = trySyncWithNtpServers(force, auto_sync_was_enabled, preferredNtpIndex);
+            if (success) {
+                digitalWrite(LED_PIN, LOW);
             }
         } else {
             Serial.print("\n[WiFi] Не удалось подключиться к сети 2 для повторной попытки");

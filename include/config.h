@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260123"
+#define FIRMWARE_VERSION "1.A0.3.260202"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -98,7 +98,9 @@ struct Config {
     char wifi_pass[32];
     char wifi_ssid_2[32];  // Вторая WiFi сеть (резервная)
     char wifi_pass_2[32];  // Пароль второй сети
-    char ntp_server[NTP_SERVER_SIZE];
+    char ntp_server_1[NTP_SERVER_SIZE];
+    char ntp_server_2[NTP_SERVER_SIZE];
+    char ntp_server_3[NTP_SERVER_SIZE];
     
     // Настройки времени
     TimeConfig time_config;
@@ -126,7 +128,7 @@ void initConfiguration();
 void setDefaultConfig();
 void saveConfig();
 void initNTPClient();
-void updateNTPServer(const char* server);
+void updateNTPServer(uint8_t index, const char* server);
 
 // Функции для работы с часовыми поясами
 bool initTimezone();             // Инициализация Timezone

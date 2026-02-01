@@ -367,7 +367,7 @@ bool compareDSTRulesWithEzTime(const TimezonePreset* preset, int startYear, int 
 
 bool initTimezone() {
     // Настраиваем ezTime NTP сервер и интервал
-    setServer(String(config.ntp_server));
+    setServer(String(config.ntp_server_1));
     setInterval(12 * 3600);
     
     // Проверяем, что локация задана
