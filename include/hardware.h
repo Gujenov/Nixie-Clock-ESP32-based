@@ -7,12 +7,12 @@
 #include <config.h>
 
 // Конфигурация пинов
-#define I2C_SDA 4
-#define I2C_SCL 5
-#define SQW_PIN 6
-#define ENC_A 15
-#define ENC_B 16
-#define ENC_BTN 17
+#define I2C_SDA 40
+#define I2C_SCL 41
+#define SQW_PIN 42
+#define ENC_A 7
+#define ENC_B 15
+#define ENC_BTN 16
 
 extern ESP32Encoder encoder;
 extern RTC_DS3231 *rtc;
