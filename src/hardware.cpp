@@ -44,12 +44,12 @@ void setupInterrupts() {
         // Работаем от DS3231 - настраиваем SQW
         pinMode(SQW_PIN, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(SQW_PIN), onSQWInterrupt, FALLING);
-        Serial.print("\nИспользуется прерывание от DS3231");
+        Serial.print("\n[SYSTEM] Используется прерывание от DS3231");
     } else {
         // Работаем от внутреннего RTC - НЕ используем прерывания
         // Просто отключаем SQW если был подключен
         detachInterrupt(digitalPinToInterrupt(SQW_PIN));
-        Serial.print("\nОтчет прерываний по внутреннему счёту ESP32 [мсек]");
+        Serial.print("\n[SYSTEM] Отчет прерываний по внутреннему счёту ESP32 [мсек]");
     }
     
 }

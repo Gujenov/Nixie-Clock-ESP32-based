@@ -24,16 +24,6 @@ void setup() {
 
     // initDFPlayer(); // времено отключено для теста
     
-    // Предварительная инициализация WiFi-стека ("прогрев")
-    // Без этого первый вызов WiFi.begin() делает холодную инициализацию,
-    // которая блокирует прерывания >300мс и вызывает INT_WDT reset на ESP32-S3
-    Serial.print("\n[WiFi] Предварительная инициализация WiFi-стека...");
-    WiFi.mode(WIFI_STA);
-    delay(100);
-    WiFi.disconnect(true);
-    delay(50);
-    Serial.print(" OK");
-    
     // DEBUG: Асинхронная синхронизация - не блокирует setup()
    // syncTimeAsync();
     
@@ -50,7 +40,7 @@ void loop() {
     unsigned long currentMillis = millis();
 
     // Неблокирующая обработка асинхронной синхронизации
-    processSyncAsync();
+   // processSyncAsync();
     
     // Обработка команд
     if (Serial.available()) {
