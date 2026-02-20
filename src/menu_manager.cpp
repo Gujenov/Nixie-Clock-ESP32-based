@@ -26,7 +26,7 @@ static void onTimezoneActivated() {
     saveConfig();
     Serial.print("\n[TZ] Автоопределение часового пояса ВКЛЮЧЕНО");
     Serial.print("\n[SYNC] Автосинхронизация ВКЛЮЧЕНА");
-    syncTime();
+    syncTimeAsync();
 }
 
 // ======================= УПРАВЛЕНИЕ РЕЖИМОМ МЕНЮ =======================
@@ -211,7 +211,7 @@ void handleTimeMenu(String command) {
         printTime();
     }
     else if (command.equals("sync")) {
-        syncTime(true);
+        syncTimeAsync(true);
     }
     // Команды установки UTC времени и даты
     else if (command.startsWith("set UTC T ") || command.startsWith("SUT ") || command.startsWith("sut ") || command.startsWith("set utc t ")) {
@@ -747,11 +747,8 @@ void handleWifiMenu(String command) {
             Serial.println("\nWiFi не настроен, синхронизация NTP невозможна (установите WiFi)");
         } else {
             Serial.print("\nПытаюсь синхронизироваться с новым NTP сервером...");
-            if (syncTime(true, index)) {
-                Serial.println("\nСинхронизация NTP выполнена успешно\n");
-            } else {
-                Serial.println("\nНе удалось синхронизироваться с NTP сервером\n");
-            }
+            syncTimeAsync(true, index);
+            Serial.println("\nСинхронизация NTP запущена, результат будет в логе\n");
         }
     }
     else {

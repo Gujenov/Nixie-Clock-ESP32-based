@@ -68,9 +68,9 @@ def run_prebuild(env):
     project_dir = env.get('PROJECT_DIR', os.getcwd())
     success = update_version(project_dir)
     if success:
-        print("[PRE-BUILD] ✅ Версия готова к компиляции\n", flush=True)
+        print("\n[PRE-BUILD] ✅ Версия готова к компиляции\n", flush=True)
     else:
-        print("[PRE-BUILD] ⚠️  Предупреждение: не удалось обновить версию\n", flush=True)
+        print("\n[PRE-BUILD] ⚠️  Предупреждение: не удалось обновить версию\n", flush=True)
 
 # Для работы с PlatformIO
 if __name__ == "__main__":

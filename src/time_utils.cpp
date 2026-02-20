@@ -8,6 +8,34 @@ extern WiFiUDP ntpUDP;         // Определен где-то еще (воз�
 extern NTPClient *timeClient;  // Определен в config.cpp
 static bool printEnabled = false; // Флаг для управления выводом в Serial
 
+// ===== DEBUG: ASYNC SYNC SUPPORT =====
+static bool syncInProgress = false;
+static bool syncLastResult = false;
+static bool syncForceFlag = false;
+static uint8_t syncPreferredNtpIndex = 0;
+static bool syncAutoEnabledSnapshot = false;
+static uint8_t syncNetworkNumber = 0;
+static uint8_t syncWifiAttempts = 0;
+static unsigned long syncLastPollMs = 0;
+static char syncSsid1[sizeof(config.wifi_ssid)] = {0};
+static char syncPass1[sizeof(config.wifi_pass)] = {0};
+static char syncSsid2[sizeof(config.wifi_ssid_2)] = {0};
+static char syncPass2[sizeof(config.wifi_pass_2)] = {0};
+
+enum AsyncSyncState : uint8_t {
+    SYNC_STATE_IDLE = 0,
+    SYNC_STATE_WIFI_INIT,      // WiFi.mode(STA) - отдельный шаг
+    SYNC_STATE_WIFI1_START,    // WiFi.begin(ssid1) - после паузы
+    SYNC_STATE_WIFI1_WAIT,
+    SYNC_STATE_WIFI2_START,
+    SYNC_STATE_WIFI2_WAIT,
+    SYNC_STATE_NTP,
+    SYNC_STATE_FINISH
+};
+
+static AsyncSyncState syncState = SYNC_STATE_IDLE;
+// ===== END DEBUG =====
+
 // Основная функция проверки и инициализации источников времени
 // Вызывается при старте и потом при каждом получении времени
 void checkTimeSource() {
@@ -58,7 +86,7 @@ void checkTimeSource() {
                     Wire.endTransmission();
                     setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
                     Serial.print("\nПопытка синхронизировать время с NTP...");
-                    syncTime(); // Пробуем синхронизировать время
+                    syncTimeAsync(); // Пробуем синхронизировать время
                 }
             }
         }
@@ -374,9 +402,141 @@ static bool trySyncWithNtpServers(bool force, bool auto_sync_was_enabled, uint8_
     return false;
 }
 
-bool syncTime(bool force, uint8_t preferredNtpIndex) {
-    const bool auto_sync_was_enabled = config.time_config.auto_sync_enabled;
-    // Проверяем, разрешена ли синхронизация
+// ===== DEBUG: ASYNC SYNC FUNCTIONS =====
+
+bool isSyncInProgress() {
+    return syncInProgress;
+}
+
+static void finishAsyncSync(bool success) {
+    syncLastResult = success;
+    syncInProgress = false;
+    syncState = SYNC_STATE_IDLE;
+
+    Serial.print("\n[WiFi] Отключение...");
+    WiFi.disconnect(true);  // Отключиться и очистить credentials
+    // WiFi-стек остаётся инициализированным (WIFI_STA) чтобы
+    // избежать повторной холодной инициализации
+
+    digitalWrite(LED_PIN, LOW);
+    if (!success) {
+        blinkError(3);  // Сокращено с 11 до 3 чтобы не блокировать loop надолго
+        Serial.print("\n[SYNC] Не удалось синхронизировать время!");
+    } else {
+        Serial.println("\n[SYNC] Синхронизация успешна!");
+    }
+}
+
+void processSyncAsync() {
+    if (!syncInProgress) return;
+
+    switch (syncState) {
+        case SYNC_STATE_WIFI_INIT:
+            // Шаг 1: установить WiFi режим (лёгкая операция, если WiFi уже был инициализирован в setup)
+            Serial.print("\n[WiFi] Инициализация WiFi.mode(STA)...");
+            WiFi.mode(WIFI_STA);
+            syncLastPollMs = millis();
+            syncState = SYNC_STATE_WIFI1_START;
+            Serial.print(" OK");
+            break;  // <-- возврат в loop(), даём системе обработать прерывания
+
+        case SYNC_STATE_WIFI1_START:
+            // Шаг 2: подключение к сети 1 (вызывается на следующей итерации loop)
+            if (millis() - syncLastPollMs < 100) break;  // Пауза 100мс между mode() и begin()
+            Serial.printf("\n[DIAG] SSID1 len=%d", (int)strlen(syncSsid1));
+            Serial.printf("\n[DIAG] PASS1 len=%d", (int)strlen(syncPass1));
+            Serial.print("\n[WiFi] Попытка подключения к сети 1");
+            WiFi.begin(syncSsid1, syncPass1);
+            syncWifiAttempts = 0;
+            syncLastPollMs = millis();
+            syncState = SYNC_STATE_WIFI1_WAIT;
+            break;
+
+        case SYNC_STATE_WIFI1_WAIT:
+            if (WiFi.status() == WL_CONNECTED) {
+                syncNetworkNumber = 1;
+                Serial.printf("\n[WiFi] Подключено к %s (сеть 1)", syncSsid1);
+                Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
+                Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
+                syncState = SYNC_STATE_NTP;
+                break;
+            }
+
+            if (millis() - syncLastPollMs >= 300) {
+                syncLastPollMs = millis();
+                Serial.print(".");
+                syncWifiAttempts++;
+                if (syncWifiAttempts >= 10) {
+                    Serial.print("\n[WiFi] Не удалось подключиться к сети 1");
+                    if (strlen(config.wifi_ssid_2) > 0) {
+                        syncState = SYNC_STATE_WIFI2_START;
+                    } else {
+                        finishAsyncSync(false);
+                    }
+                }
+            }
+            break;
+
+        case SYNC_STATE_WIFI2_START:
+            Serial.print("\n[WiFi] Попытка подключения к сети 2");
+            WiFi.disconnect(false);  // Отключиться, но не выключать WiFi-стек
+            delay(50);
+            WiFi.begin(syncSsid2, syncPass2);
+            syncWifiAttempts = 0;
+            syncLastPollMs = millis();
+            syncState = SYNC_STATE_WIFI2_WAIT;
+            break;
+
+        case SYNC_STATE_WIFI2_WAIT:
+            if (WiFi.status() == WL_CONNECTED) {
+                syncNetworkNumber = 2;
+                Serial.printf("\n[WiFi] Подключено к %s (сеть 2)", syncSsid2);
+                Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
+                Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
+                syncState = SYNC_STATE_NTP;
+                break;
+            }
+
+            if (millis() - syncLastPollMs >= 300) {
+                syncLastPollMs = millis();
+                Serial.print(".");
+                syncWifiAttempts++;
+                if (syncWifiAttempts >= 10) {
+                    Serial.print("\n[WiFi] Не удалось подключиться к сети 2");
+                    finishAsyncSync(false);
+                }
+            }
+            break;
+
+        case SYNC_STATE_NTP: {
+            bool success = trySyncWithNtpServers(syncForceFlag, syncAutoEnabledSnapshot, syncPreferredNtpIndex);
+            if (!success && syncNetworkNumber == 1 && strlen(config.wifi_ssid_2) > 0) {
+                Serial.print("\n[NTP] Попытка через сеть 2...");
+                syncState = SYNC_STATE_WIFI2_START;
+            } else {
+                finishAsyncSync(success);
+            }
+            break;
+        }
+
+        case SYNC_STATE_FINISH:
+        case SYNC_STATE_IDLE:
+        default:
+            break;
+    }
+}
+
+// Асинхронный запуск синхронизации
+void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
+    // DEBUG: Serial.print("\n[DEBUG] syncTimeAsync() вызвана");
+    
+    if (syncInProgress) {
+        Serial.print("\n[SYNC] Синхронизация уже выполняется...");
+        return;
+    }
+    
+    // Первичные проверки (А и Б из требований)
+    // DEBUG: Serial.print("\n[DEBUG] Проверка А: разрешена ли синхронизация...");
     if (!force && !config.time_config.auto_sync_enabled) {
         Serial.print("\n\n[SYNC] Автоматическая синхронизация отключена");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
@@ -385,10 +545,10 @@ bool syncTime(bool force, uint8_t preferredNtpIndex) {
             strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
             Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
         }
-        return false;
+        return;
     }
     
-    // Проверяем, настроен ли WiFi
+    // DEBUG: Serial.print("\n[DEBUG] Проверка Б: настроен ли WiFi...");
     if (strlen(config.wifi_ssid) == 0) {
         Serial.print("\n\n[SYNC] WiFi не настроен, автоматическая синхронизация невозможна");
         Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
@@ -397,154 +557,48 @@ bool syncTime(bool force, uint8_t preferredNtpIndex) {
             strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
             Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
         }
-        return false;
+        return;
     }
     
-    // Проверяем, инициализирован ли timeClient
+    // DEBUG: Serial.print("\n[DEBUG] Проверка В: инициализирован ли timeClient...");
     if (!timeClient) {
         Serial.print("\n\n[SYNC] Ошибка: timeClient не инициализирован");
-        return false;
+        return;
     }
     
+    // Точка Б из требований - дошли до запуска LED и сообщения
     digitalWrite(LED_PIN, HIGH);
     Serial.print("\n\n[SYNC] Попытка синхронизации...");
-    
-    bool success = false;
-    bool wifi_connected = false;
-    int network_number = 0;  // 1 или 2
-    
-    // 1. Включаем WiFi
-    WiFi.mode(WIFI_STA);
-    
-    // 2. Пробуем подключиться к первой сети
-    if (strlen(config.wifi_ssid) > 0) {
-        Serial.print("\n[WiFi] Попытка подключения к сети 1");
-        WiFi.begin(config.wifi_ssid, config.wifi_pass);
-        
-        int attempts = 0;
-        Serial.print("\n[WiFi] Подключение");
-        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-            delay(300);
-            Serial.print(".");
-            attempts++;
-        }
-        Serial.print("\n");
-        
-        if (WiFi.status() == WL_CONNECTED) {
-            wifi_connected = true;
-            network_number = 1;
-            Serial.printf("\n[WiFi] Подключено к %s (сеть 1)", config.wifi_ssid);
-            Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
-            Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
-        } else {
-            Serial.print("\n[WiFi] Не удалось подключиться к сети 1");
-        }
-    }
-    
-    // 3. Если первая сеть не подключилась, пробуем вторую
-    if (!wifi_connected && strlen(config.wifi_ssid_2) > 0) {
-        Serial.print("\n[WiFi] Попытка подключения к сети 2");
-        WiFi.disconnect();
-        delay(100);
-        WiFi.begin(config.wifi_ssid_2, config.wifi_pass_2);
-        
-        int attempts = 0;
-        Serial.print("\n[WiFi] Подключение");
-        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-            delay(300);
-            Serial.print(".");
-            attempts++;
-        }
-        Serial.print("\n");
-        
-        if (WiFi.status() == WL_CONNECTED) {
-            wifi_connected = true;
-            network_number = 2;
-            Serial.printf("\n[WiFi] Подключено к %s (сеть 2)", config.wifi_ssid_2);
-            Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
-            Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
-        } else {
-            Serial.print("\n[WiFi] Не удалось подключиться к сети 2");
-        }
-    }
-    
-    // 4. Если не удалось подключиться ни к одной сети
-    if (!wifi_connected) {
-        Serial.print("\n[WIFI] Ошибка: не удалось подключиться ни к одной WiFi сети");
-        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
-        if (config.time_config.automatic_localtime &&
-            config.time_config.tz_posix[0] != '\0' &&
-            strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
-            Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
-        }
-        digitalWrite(LED_PIN, LOW);
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_OFF);
-        return false;
-    }
-    
-    // 5. Пробуем синхронизироваться с NTP (с учетом предпочтительного сервера)
-    success = trySyncWithNtpServers(force, auto_sync_was_enabled, preferredNtpIndex);
-    if (success) {
-        digitalWrite(LED_PIN, LOW);
-    }
-    
-    // 6. Если не удалось через первую сеть и есть вторая - пробуем вторую
-    if (!success && network_number == 1 && strlen(config.wifi_ssid_2) > 0) {
-        Serial.print("\n[NTP] Попытка синхронизации через сеть 2...");
-        
-        // Отключаемся от первой сети
-        WiFi.disconnect();
-        delay(100);
-        
-        // Подключаемся ко второй сети
-        WiFi.begin(config.wifi_ssid_2, config.wifi_pass_2);
-        
-        int attempts = 0;
-        Serial.print("\n[WiFi] Подключение");
-        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-            delay(300);
-            Serial.print(".");
-            attempts++;
-        }
-        Serial.print("\n");
-        
-        if (WiFi.status() == WL_CONNECTED) {
-            Serial.printf("\n[WiFi] Подключено к %s (сеть 2)", config.wifi_ssid_2);
-            Serial.printf("\n[WiFi] IP: %s", WiFi.localIP().toString().c_str());
-            Serial.printf(" | RSSI: %d dBm", WiFi.RSSI());
-            
-            // Пробуем синхронизироваться с NTP через вторую сеть (с учетом предпочтительного сервера)
-            success = trySyncWithNtpServers(force, auto_sync_was_enabled, preferredNtpIndex);
-            if (success) {
-                digitalWrite(LED_PIN, LOW);
-            }
-        } else {
-            Serial.print("\n[WiFi] Не удалось подключиться к сети 2 для повторной попытки");
-        }
-    }
-    
-    // 7. Отключаем WiFi
-    Serial.print("\n[WiFi] Отключение...");
-    WiFi.disconnect(true);
-    delay(100);
-    WiFi.mode(WIFI_OFF);
-    
-    if (!success) {
-        blinkError(11);
-        Serial.print("\n[SYNC] Не удалось синхронизировать время!");
-        Serial.print("\n[TZ] ⚠️  Будет использоваться табличный переход на летнее/зимнее время");
-        if (config.time_config.automatic_localtime &&
-            config.time_config.tz_posix[0] != '\0' &&
-            strcmp(config.time_config.tz_posix_zone, config.time_config.timezone_name) == 0) {
-            Serial.print("\n[TZ] ℹ️  Используются сохранённые POSIX правила (offline)");
-        }
-    } else {
-        Serial.println("\n[SYNC] Синхронизация успешна!");
-    }
-    
-    return success;
+
+    // ДИАГНОСТИКА
+    Serial.printf("\n[DIAG] Free heap: %d bytes", ESP.getFreeHeap());
+    Serial.printf("\n[DIAG] Current WiFi mode: %d", (int)WiFi.getMode());
+    Serial.printf("\n[DIAG] WiFi status: %d", WiFi.status());
+
+    // Запуск кооперативной асинхронной синхронизации (без отдельной RTOS-задачи)
+    Serial.print("\n[DIAG] WiFi pre-begin tuning skipped");
+
+    syncForceFlag = force;
+    syncPreferredNtpIndex = preferredNtpIndex;
+    syncAutoEnabledSnapshot = config.time_config.auto_sync_enabled;
+    strlcpy(syncSsid1, config.wifi_ssid, sizeof(syncSsid1));
+    strlcpy(syncPass1, config.wifi_pass, sizeof(syncPass1));
+    strlcpy(syncSsid2, config.wifi_ssid_2, sizeof(syncSsid2));
+    strlcpy(syncPass2, config.wifi_pass_2, sizeof(syncPass2));
+    syncNetworkNumber = 0;
+    syncWifiAttempts = 0;
+    syncLastResult = false;
+    syncInProgress = true;
+    syncState = SYNC_STATE_WIFI_INIT;
+
+    Serial.print("\n[DEBUG] Async sync initialized (loop-driven)");
 }
+
+// ===== END DEBUG =====
+
+
+
+
 
 bool printTime() {
     // Получаем время через getCurrentUTCTime() - она сама определит источник
@@ -619,7 +673,7 @@ void setDefaultTimeToAllSources() {
     
     time_t default_time = mktime(&default_tm);
 
-    Serial.print("\n[SYNC] Устанавливаю время по умолчанию: 2025-07-06 09:00:00 UTC");
+    Serial.print("\n[SYSTEM] Устанавливаю время по умолчанию: 2025-07-06 09:00:00 UTC");
     // Устанавливаем во все источники
     setTimeToAllSources(default_time);
 }

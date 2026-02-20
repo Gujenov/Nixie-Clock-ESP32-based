@@ -44,7 +44,7 @@ void handleCommand(String command) {
         enterEngineeringMenu();
     }
     else if (command.equals("sync")) {
-        syncTime(true);
+        syncTimeAsync(true);
     }
     // Команды установки UTC времени и даты
     else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {

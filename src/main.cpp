@@ -6,6 +6,7 @@
 #include "time_utils.h"
 #include "alarm_handler.h"
 #include "dfplayer_manager.h"
+#include <esp_system.h>
 
 static bool sqwFailed = false;
 extern bool printEnabled;
@@ -15,14 +16,17 @@ void processSecondTick();
 void setup() {
     delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
+    Serial.printf("\n[BOOT] reset reason: %d", (int)esp_reset_reason());
     initConfiguration();
     initNTPClient();
     checkTimeSource(); 
     printDS3231Temperature();
 
-    // initDFPlayer(); // временно отключено для теста
+    // initDFPlayer(); // времено отключено для теста
     
-    syncTime();
+   
+    // DEBUG: Асинхронная синхронизация - не блокирует setup()
+   // syncTimeAsync();
     
     Serial.print("\n\n=== Система готова ===");
     Serial.println("\n\nhelp / ? - Перечень доступных команд");
@@ -35,6 +39,9 @@ void loop() {
     static unsigned long lastSecondCheck = 0;
     static unsigned long lastSQWCheck = 0;
     unsigned long currentMillis = millis();
+
+    // Неблокирующая обработка асинхронной синхронизации
+    processSyncAsync();
     
     // Обработка команд
     if (Serial.available()) {
@@ -114,7 +121,7 @@ void processSecondTick() {
     static uint8_t lastSyncHour = 255;
     if ((local_tm_info.tm_hour == 3 || local_tm_info.tm_hour == 15) && local_tm_info.tm_min == 5) {
         if (local_tm_info.tm_hour != lastSyncHour) {
-            syncTime();
+            syncTimeAsync();
             lastSyncHour = local_tm_info.tm_hour;
         }
     }

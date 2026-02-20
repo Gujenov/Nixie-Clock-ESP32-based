@@ -21,11 +21,16 @@ void initHardware() {
     encoder.setFilter(15000);
     encoder.setCount(0);
 
-    Serial.begin(19200);
+    Serial.begin(115200);
     delay(300);
 
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
+    
+    // Настройка пинов 37-39 на вход (неиспользуемые)
+    pinMode(37, INPUT);
+    pinMode(38, INPUT);
+    pinMode(39, INPUT);
 }
 
 void IRAM_ATTR onSQWInterrupt() {
