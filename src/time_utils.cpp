@@ -85,8 +85,8 @@ void checkTimeSource() {
                     Wire.write(status & 0x7F);
                     Wire.endTransmission();
                     setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
-                    Serial.print("\nПопытка синхронизировать время с NTP...");
-                    syncTimeAsync(); // Пробуем синхронизировать время
+                    // Serial.print("\nПопытка синхронизировать время с NTP...");
+                    // syncTimeAsync(); // ВРЕМЕННО ОТКЛЮЧЕНО — вызывает перезагрузку
                 }
             }
         }

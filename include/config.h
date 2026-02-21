@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260220"
+#define FIRMWARE_VERSION "1.A0.3.260221"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -17,8 +17,8 @@
 
 // DFPlayer Mini (UART)
 // Настройте под вашу проводку
-#define DFPLAYER_TX_PIN 17  // ESP32 TX -> DFPlayer RX
-#define DFPLAYER_RX_PIN 18  // ESP32 RX -> DFPlayer TX
+#define DFPLAYER_TX_PIN 16  // ESP32 TX -> DFPlayer RX
+#define DFPLAYER_RX_PIN 17  // ESP32 RX -> DFPlayer TX
 #define DFPLAYER_BUSY_PIN -1 // -1 если не используется
 
 // Настройки таймера

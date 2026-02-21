@@ -121,7 +121,7 @@ void processSecondTick() {
     static uint8_t lastSyncHour = 255;
     if ((local_tm_info.tm_hour == 3 || local_tm_info.tm_hour == 15) && local_tm_info.tm_min == 5) {
         if (local_tm_info.tm_hour != lastSyncHour) {
-            syncTimeAsync();
+            // syncTimeAsync(); // ВРЕМЕННО ОТКЛЮЧЕНО — вызывает перезагрузку
             lastSyncHour = local_tm_info.tm_hour;
         }
     }

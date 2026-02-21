@@ -778,7 +778,8 @@ void printInfoMenu() {
     Serial.println("\n\n=== Информация о ESP32 ===");
     
     // Информация о чипе
-    Serial.printf("\nESP-ROM: %s", ESP.getChipModel());
+    String chipModel = ESP.getChipModel();
+    Serial.printf("\nESP-ROM: %s", chipModel.c_str());
     Serial.printf("\nCPU Частота: %d MHz\n", ESP.getCpuFreqMHz());
 
     Serial.printf("IDF версия: %s\n", esp_get_idf_version());
@@ -791,19 +792,24 @@ void printInfoMenu() {
     uint32_t freeSketch = ESP.getFreeSketchSpace();
     uint32_t appPartition = sketchSize + freeSketch;
 
-    Serial.printf("\nFlash Size: %d MB\n", flashSize / (1024 * 1024));
+    Serial.printf("\nFlash Size: %lu MB\n", static_cast<unsigned long>(flashSize / (1024 * 1024)));
     Serial.printf("App partition size: %.2f MB\n", appPartition / (1024.0 * 1024.0));
     Serial.printf("Sketch size: %.2f MB\n", sketchSize / (1024.0 * 1024.0));
     Serial.printf("App free space: %.2f MB\n", freeSketch / (1024.0 * 1024.0));
 
-    Serial.printf("App usage: %.1f%%\n", (sketchSize * 100.0) / appPartition);
+    float appUsage = (appPartition > 0) ? ((sketchSize * 100.0f) / appPartition) : 0.0f;
+    Serial.printf("App usage: %.1f%%\n", appUsage);
     
     printMappingMenuCommands();  //Управление меню    
     
 }
 
 void handleInfoMenu(String command) {
-    if (handleCommonMenuCommands(command, printInfoMenu)) return;
+    command.trim();
+    String cmdLower = command;
+    cmdLower.toLowerCase();
+
+    if (handleCommonMenuCommands(cmdLower, printInfoMenu)) return;
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
