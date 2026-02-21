@@ -6,7 +6,7 @@
 #include <BLE2902.h>
 
 namespace {
-constexpr const char* BLE_DEVICE_NAME = "Nixie Clock";
+constexpr const char* BLE_DEVICE_NAME = "Nixie Clock BLE";
 constexpr const char* NUS_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 constexpr const char* NUS_RX_UUID      = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"; // write
 constexpr const char* NUS_TX_UUID      = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"; // notify
@@ -15,6 +15,10 @@ BLEServer* bleServer = nullptr;
 BLECharacteristic* txCharacteristic = nullptr;
 bool bleEnabled = false;
 volatile bool bleConnected = false;
+volatile bool bleWelcomePending = false;
+volatile bool bleDisconnectPending = false;
+unsigned long bleLastHeartbeatMs = 0;
+constexpr unsigned long BLE_HEARTBEAT_INTERVAL_MS = 5000;
 
 String rxLineBuffer;
 
@@ -41,10 +45,13 @@ class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) override {
         (void)pServer;
         bleConnected = true;
+        bleWelcomePending = true;
+        bleDisconnectPending = false;
     }
 
     void onDisconnect(BLEServer* pServer) override {
         bleConnected = false;
+        bleDisconnectPending = true;
         if (bleEnabled && pServer) {
             pServer->startAdvertising();
         }
@@ -58,8 +65,11 @@ class RxCallbacks : public BLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if (value.empty()) return;
 
+        bool gotTerminator = false;
+
         for (char c : value) {
             if (c == '\r' || c == '\n') {
+                gotTerminator = true;
                 rxLineBuffer.trim();
                 if (rxLineBuffer.length() > 0) {
                     enqueueCommand(rxLineBuffer);
@@ -70,6 +80,15 @@ class RxCallbacks : public BLECharacteristicCallbacks {
                 if (rxLineBuffer.length() > 128) {
                     rxLineBuffer = "";
                 }
+            }
+        }
+
+        // Позволяем отправлять команду одним write без \n/\r
+        if (!gotTerminator) {
+            rxLineBuffer.trim();
+            if (rxLineBuffer.length() > 0) {
+                enqueueCommand(rxLineBuffer);
+                rxLineBuffer = "";
             }
         }
     }
@@ -94,7 +113,7 @@ void notifyChunk(const char* data, size_t len) {
 
 void bleTerminalEnable() {
     if (bleEnabled) {
-        Serial.println("[BLE] Уже включен");
+        Serial.println("[Bluetooth] Уже включен");
         return;
     }
 
@@ -127,13 +146,16 @@ void bleTerminalEnable() {
     BLEDevice::startAdvertising();
     bleEnabled = true;
     bleConnected = false;
+    bleWelcomePending = false;
+    bleDisconnectPending = false;
+    bleLastHeartbeatMs = millis();
 
-    Serial.println("[BLE] Включен (NUS), ожидаю подключение телефона");
+    Serial.println("[Bluetooth] Включен (NUS), ожидаю подключение телефона");
 }
 
 void bleTerminalDisable() {
     if (!bleEnabled) {
-        Serial.println("[BLE] Уже выключен");
+        Serial.println("[Bluetooth] Уже выключен");
         return;
     }
 
@@ -144,13 +166,16 @@ void bleTerminalDisable() {
     txCharacteristic = nullptr;
     bleConnected = false;
     bleEnabled = false;
+    bleWelcomePending = false;
+    bleDisconnectPending = false;
+    bleLastHeartbeatMs = 0;
 
     portENTER_CRITICAL(&bleQueueMux);
     queueHead = queueTail = queueCount = 0;
     portEXIT_CRITICAL(&bleQueueMux);
     rxLineBuffer = "";
 
-    Serial.println("[BLE] Выключен");
+    Serial.println("[Bluetooth] Выключен");
 }
 
 bool bleTerminalIsEnabled() {
@@ -158,7 +183,22 @@ bool bleTerminalIsEnabled() {
 }
 
 void bleTerminalProcess() {
-    // Зарезервировано для фоновой логики
+    if (bleEnabled && bleDisconnectPending) {
+        bleDisconnectPending = false;
+        Serial.println("\n[Bluetooth] Телефон отключен\n");
+    }
+
+    if (bleEnabled && bleConnected && bleWelcomePending) {
+        bleWelcomePending = false;
+        Serial.println("\n[Bluetooth] Телефон подключен\n");
+        bleTerminalLog("\n[Bluetooth] Connected. Commands: bon, boff, reset\n");
+        bleLastHeartbeatMs = millis();
+    }
+
+    if (bleEnabled && bleConnected && (millis() - bleLastHeartbeatMs >= BLE_HEARTBEAT_INTERVAL_MS)) {
+        bleLastHeartbeatMs = millis();
+        bleTerminalLog("[Bluetooth] alive\n");
+    }
 }
 
 bool bleTerminalHasCommand() {

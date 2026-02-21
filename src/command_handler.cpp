@@ -6,6 +6,7 @@
 #include "menu_manager.h"
 #include "engineering_menu.h"
 #include "ble_terminal.h"
+#include <esp_system.h>
 
 // Объявляем внешние переменные
 extern WiFiUDP ntpUDP;
@@ -20,10 +21,19 @@ void handleCommand(String command) {
     if (command.equalsIgnoreCase("bon")) {
         bleTerminalEnable();
         Serial.println("[BLE] Команды: bon / boff");
+        bleTerminalLog("[BLE] enabled\n");
         return;
     }
     if (command.equalsIgnoreCase("boff")) {
+        bleTerminalLog("[BLE] disabling...\n");
         bleTerminalDisable();
+        return;
+    }
+    if (command.equalsIgnoreCase("reset") || command.equalsIgnoreCase("rst") || command.equalsIgnoreCase("reboot")) {
+        Serial.println("[SYSTEM] Перезагрузка...");
+        bleTerminalLog("[BLE] rebooting...\n");
+        delay(100);
+        ESP.restart();
         return;
     }
 

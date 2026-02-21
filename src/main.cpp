@@ -53,7 +53,9 @@ void loop() {
         String bleCommand = bleTerminalReadCommand();
         bleCommand.trim();
         if (bleCommand.length() > 0) {
+            bleTerminalLog(String("\n[BLE] > ") + bleCommand + "\n");
             handleCommand(bleCommand);
+            bleTerminalLog("[BLE] OK\n");
         }
     }
  
