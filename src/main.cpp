@@ -25,7 +25,7 @@ void setup() {
     // initDFPlayer(); // времено отключено для теста
     
     // DEBUG: Асинхронная синхронизация - не блокирует setup()
-   // syncTimeAsync();
+    syncTimeAsync();
     
     Serial.print("\n\n=== Система готова ===");
     Serial.println("\n\nhelp / ? - Перечень доступных команд");
@@ -37,11 +37,9 @@ void setup() {
 void loop() {
     static unsigned long lastSecondCheck = 0;
     static unsigned long lastSQWCheck = 0;
+    static bool sqwMonitorArmed = false;
     unsigned long currentMillis = millis();
-
-    // Неблокирующая обработка асинхронной синхронизации
-   // processSyncAsync();
-    
+   
     // Обработка команд
     if (Serial.available()) {
         String command = Serial.readStringUntil('\n');
@@ -53,6 +51,14 @@ void loop() {
     // (ТОЛЬКО если не в режиме меню)
     if (!inMenuMode) {
         if (ds3231_available) {
+            if (!sqwMonitorArmed) {
+                // DS3231 только что стал доступен: даём окну контроля стартовать от "сейчас",
+                // чтобы не получить ложный WARN из-за lastSQWCheck == 0 после загрузки.
+                lastSQWCheck = currentMillis;
+                sqwFailed = false;
+                sqwMonitorArmed = true;
+            }
+
             if (timeUpdatedFromSQW) {
                 portENTER_CRITICAL(&timerMux);
                 timeUpdatedFromSQW = false;
@@ -73,6 +79,8 @@ void loop() {
             }
         }
         else {
+            sqwMonitorArmed = false;
+            sqwFailed = false;
             if (currentMillis - lastSecondCheck >= 1000) {
                 lastSQWCheck = currentMillis;
                 lastSecondCheck = currentMillis;
@@ -101,7 +109,7 @@ void processSecondTick() {
     // Индикация работы
     if (printEnabled) {
         if (ds3231_available && !sqwFailed) {
-            Serial.print(".");
+            Serial.print("/");
         } else {
             Serial.print("*");
         }

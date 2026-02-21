@@ -23,7 +23,6 @@ static char syncPass2[sizeof(config.wifi_pass_2)] = {0};
 // Вызывается при старте и потом при каждом получении времени
 void checkTimeSource() {
     static bool firstCheck = true;
-    static bool interruptsConfigured = false;
     static bool firstRunMessage = true;
     static unsigned long lastProbeMillis = 0;
     
@@ -34,15 +33,6 @@ void checkTimeSource() {
         Serial.print("\n\n[SYSTEM] Инициализация I2C завершена");
     }
     
-    // Если это первый запуск и DS3231 не найден
-    if (firstRunMessage && !ds3231_available && !rtc) {
-        currentTimeSource = INTERNAL_RTC;
-        Serial.print("\n✓ Используются внутренние часы RTC");
-        setDefaultTimeToAllSources();
-        setupInterrupts();
-        firstRunMessage = false;
-    }
-
     // Не дёргаем I2C слишком часто, если DS3231 отсутствует
     unsigned long nowMillis = millis();
     if (!ds3231_available && (nowMillis - lastProbeMillis < 1000)) {
@@ -52,6 +42,18 @@ void checkTimeSource() {
 
     Wire.beginTransmission(0x68);
     bool ds3231_now_available = (Wire.endTransmission() == 0);
+
+    // Первичное решение источника на старте принимаем ПОСЛЕ probing I2C,
+    // чтобы не уходить преждевременно во внутренний RTC, когда DS3231 доступен.
+    if (firstRunMessage) {
+        firstRunMessage = false;
+        if (!ds3231_now_available) {
+            currentTimeSource = INTERNAL_RTC;
+            Serial.print("\n✓ Используются внутренние часы RTC");
+            setDefaultTimeToAllSources();
+            setupInterrupts();
+        }
+    }
 
     // Проверка OSF (только если DS3231 доступен)
     if (ds3231_now_available) {
@@ -246,7 +248,7 @@ static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled)
     
     // Показываем информацию о режиме работы с часовыми поясами
     if (config.time_config.automatic_localtime) {
-        Serial.print("\n[TZ] Автоматическое определение локального времени включено.");
+        Serial.print("\n[TZ] Автоматическое определение локального времени включено");
         Serial.printf("\n[TZ] Задана локация: %s (режим: ezTime online)", config.time_config.timezone_name);
         
         // Обновляем/инициализируем ezTime после подключения WiFi
@@ -393,8 +395,6 @@ bool isSyncInProgress() {
 
 // Функция задачи FreeRTOS — полный цикл WiFi→NTP→отключение
 static void wifiSyncTask(void* param) {
-    Serial.printf("\n[SYNC-TASK] Запуск на ядре %d", xPortGetCoreID());
-    
     bool success = false;
     uint8_t networkNum = 0;
 
@@ -411,7 +411,6 @@ static void wifiSyncTask(void* param) {
     Serial.print(" OK");
 
     // --- Шаг 2: Подключение к сети 1 ---
-    Serial.printf("\n[DIAG] SSID1 len=%d, PASS1 len=%d", (int)strlen(syncSsid1), (int)strlen(syncPass1));
     Serial.print("\n[WiFi] Подключение к сети 1");
     WiFi.begin(syncSsid1, syncPass1);
 
@@ -493,16 +492,7 @@ static void wifiSyncTask(void* param) {
 
     syncLastResult = success;
     syncInProgress = false;
-
-    Serial.printf("\n[SYNC-TASK] Задача завершена, heap: %d bytes", ESP.getFreeHeap());
     vTaskDelete(NULL);  // Самоудаление задачи
-}
-
-// Обработка асинхронной синхронизации — теперь ничего делать не нужно,
-// всё происходит в отдельной RTOS-задаче
-void processSyncAsync() {
-    // Задача FreeRTOS работает автономно.
-    // Эта функция сохранена для совместимости API (вызывается из loop).
 }
 
 // Асинхронный запуск синхронизации (создаёт RTOS-задачу)
@@ -554,7 +544,6 @@ void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
 
     digitalWrite(LED_PIN, HIGH);
     Serial.print("\n\n[SYNC] Попытка синхронизации...");
-    Serial.printf("\n[DIAG] Free heap: %d bytes", ESP.getFreeHeap());
 
     syncInProgress = true;
 
@@ -579,11 +568,6 @@ void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
         Serial.print("\n[SYNC] RTOS-задача создана");
     }
 }
-
-// ===== END ASYNC SYNC =====
-
-
-
 
 
 bool printTime() {
