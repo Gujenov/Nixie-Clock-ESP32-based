@@ -887,6 +887,7 @@ void printQuickHelp() {
     Serial.println("  time / t     - Текущее время");
     Serial.println("  sync        - Синхронизировать с NTP");
     Serial.println("  menu / m     - Главное меню");
+    Serial.println("  bon / boff   - Вкл/выкл BLE терминал");
     Serial.println("  help / ?     - Это сообщение");
     Serial.println("==========================\n");
 }

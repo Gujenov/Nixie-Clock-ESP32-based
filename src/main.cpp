@@ -2,10 +2,11 @@
 #include "config.h"
 #include "hardware.h"
 #include "command_handler.h"
-#include "menu_manager.h"  // Теперь меню отдельно
+#include "menu_manager.h"  
 #include "time_utils.h"
 #include "alarm_handler.h"
 #include "dfplayer_manager.h"
+#include "ble_terminal.h"
 #include <esp_system.h>
 
 static bool sqwFailed = false;
@@ -45,6 +46,15 @@ void loop() {
         String command = Serial.readStringUntil('\n');
         command.trim();
         handleCommand(command);
+    }
+
+    bleTerminalProcess();
+    if (bleTerminalHasCommand()) {
+        String bleCommand = bleTerminalReadCommand();
+        bleCommand.trim();
+        if (bleCommand.length() > 0) {
+            handleCommand(bleCommand);
+        }
     }
  
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===

@@ -5,6 +5,7 @@
 #include "hardware.h"
 #include "menu_manager.h"
 #include "engineering_menu.h"
+#include "ble_terminal.h"
 
 // Объявляем внешние переменные
 extern WiFiUDP ntpUDP;
@@ -14,6 +15,22 @@ extern bool ds3231_available;
 
 void handleCommand(String command) {
     command.trim();
+
+    // Управление BLE-монитором (доступно всегда, даже внутри меню)
+    if (command.equalsIgnoreCase("bon")) {
+        bleTerminalEnable();
+        Serial.println("[BLE] Команды: bon / boff");
+        return;
+    }
+    if (command.equalsIgnoreCase("boff")) {
+        bleTerminalDisable();
+        return;
+    }
+
+    // Дублируем команду в BLE, если он включен
+    if (bleTerminalIsEnabled() && command.length() > 0) {
+        bleTerminalLog(String("\n> ") + command + "\n");
+    }
     
     // Если в режиме меню - передаём в менеджер меню
     if (inMenuMode) {
