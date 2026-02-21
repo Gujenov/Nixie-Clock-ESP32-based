@@ -21,7 +21,7 @@ def update_version(project_dir=None):
     
     # Проверяем что файл существует
     if not os.path.exists(config_path):
-        print(f"❌ Файл {config_path} не найден!")
+        print(f"[ERROR] Файл {config_path} не найден!")
         print(f"   Текущая директория: {os.getcwd()}")
         print(f"   Проект директория: {project_dir}")
         return False
@@ -35,7 +35,7 @@ def update_version(project_dir=None):
         # Формат: 1.A0.3.251201 (цифра.буква+цифра.цифра.дата)
         match = re.search(r'#define FIRMWARE_VERSION "(\d)\.([A-Z]\d)\.(\d)\.\d+"', content)
         if not match:
-            print("❌ Не удалось найти FIRMWARE_VERSION в config.h")
+            print("[ERROR] Не удалось найти FIRMWARE_VERSION в config.h")
             print(f"   Текущий формат версии должен быть: MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE")
             print(f"   Пример: 1.A0.3.251206")
             return False
@@ -54,11 +54,11 @@ def update_version(project_dir=None):
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
         
-        print(f"✅ Версия обновлена: {new_version}")
+        print(f"[OK] Версия обновлена: {new_version}")
         return True
         
     except Exception as e:
-        print(f"❌ Ошибка при обновлении версии: {e}")
+        print(f"[ERROR] Ошибка при обновлении версии: {e}")
         return False
 
 # Точка входа для PlatformIO: скрипт выполняется при импорте
@@ -90,4 +90,4 @@ else:
         Import("env")
         run_prebuild(env)
     except Exception as e:
-        print(f"[PRE-BUILD] ⚠️  Скрипт не запущен через PlatformIO: {e}", flush=True)
+        print(f"[PRE-BUILD] [WARN] Скрипт не запущен через PlatformIO: {e}", flush=True)

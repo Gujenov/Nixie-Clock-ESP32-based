@@ -27,11 +27,6 @@ void initHardware() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
     
-    // Настройка пинов 36-39 на вход (неиспользуемые)
-    pinMode(36, INPUT);
-    pinMode(37, INPUT);
-    pinMode(38, INPUT);
-    pinMode(39, INPUT);
 }
 
 void IRAM_ATTR onSQWInterrupt() {
@@ -45,12 +40,12 @@ void setupInterrupts() {
         // Работаем от DS3231 - настраиваем SQW
         pinMode(SQW_PIN, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(SQW_PIN), onSQWInterrupt, FALLING);
-        Serial.print("\nИспользуется прерывание от DS3231");
+        Serial.print("\n[SYSTEM] Используется прерывание от DS3231");
     } else {
         // Работаем от внутреннего RTC - НЕ используем прерывания
         // Просто отключаем SQW если был подключен
         detachInterrupt(digitalPinToInterrupt(SQW_PIN));
-        Serial.print("\nОтчет прерываний по внутреннему счёту ESP32 [мсек]");
+        Serial.print("\n[SYSTEM] Отчет прерываний по внутреннему счёту ESP32 [мсек]");
     }
     
 }

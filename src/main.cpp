@@ -24,7 +24,6 @@ void setup() {
 
     // initDFPlayer(); // времено отключено для теста
     
-   
     // DEBUG: Асинхронная синхронизация - не блокирует setup()
    // syncTimeAsync();
     
@@ -41,7 +40,7 @@ void loop() {
     unsigned long currentMillis = millis();
 
     // Неблокирующая обработка асинхронной синхронизации
-    processSyncAsync();
+   // processSyncAsync();
     
     // Обработка команд
     if (Serial.available()) {
@@ -121,7 +120,7 @@ void processSecondTick() {
     static uint8_t lastSyncHour = 255;
     if ((local_tm_info.tm_hour == 3 || local_tm_info.tm_hour == 15) && local_tm_info.tm_min == 5) {
         if (local_tm_info.tm_hour != lastSyncHour) {
-            // syncTimeAsync(); // ВРЕМЕННО ОТКЛЮЧЕНО — вызывает перезагрузку
+            syncTimeAsync();
             lastSyncHour = local_tm_info.tm_hour;
         }
     }
