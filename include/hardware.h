@@ -7,8 +7,8 @@
 #include <config.h>
 
 // Конфигурация пинов
-#define I2C_SDA 40
-#define I2C_SCL 41
+#define I2C_SDA 39
+#define I2C_SCL 40
 #define SQW_PIN 42
 #define ENC_A 7
 #define ENC_B 15
