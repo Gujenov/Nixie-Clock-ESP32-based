@@ -888,6 +888,7 @@ void printQuickHelp() {
     Serial.println("  sync        - Синхронизировать с NTP");
     Serial.println("  menu / m     - Главное меню");
     Serial.println("  bon / boff   - Вкл/выкл BLE терминал");
+    Serial.println("  bdbg on/off  - Отладка BLE приёма");
     Serial.println("  help / ?     - Это сообщение");
     Serial.println("==========================\n");
 }

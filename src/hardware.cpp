@@ -9,12 +9,21 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 HardwareSource currentTimeSource = INTERNAL_RTC;
 bool ds3231_available = false;
 volatile bool timeUpdatedFromSQW = false;
+static bool sqwInterruptAttached = false;
 
 void initHardware() {
 // Настройка пинов Энкодера
     pinMode(ENC_A, INPUT_PULLUP);
     pinMode(ENC_B, INPUT_PULLUP);
     pinMode(ENC_BTN, INPUT_PULLUP);
+
+    // Линии 74HC595: сразу переводим в выход и удерживаем в лог.0
+    pinMode(SR595_DATA_PIN, OUTPUT);
+    pinMode(SR595_CLK_PIN, OUTPUT);
+    pinMode(SR595_LATCH_PIN, OUTPUT);
+    digitalWrite(SR595_DATA_PIN, LOW);
+    digitalWrite(SR595_CLK_PIN, LOW);
+    digitalWrite(SR595_LATCH_PIN, LOW);
 
     // Инициализация энкодера
     encoder.attachSingleEdge(ENC_A, ENC_B);
@@ -39,12 +48,18 @@ void setupInterrupts() {
     if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
         // Работаем от DS3231 - настраиваем SQW
         pinMode(SQW_PIN, INPUT_PULLUP);
-        attachInterrupt(digitalPinToInterrupt(SQW_PIN), onSQWInterrupt, FALLING);
+        if (!sqwInterruptAttached) {
+            attachInterrupt(digitalPinToInterrupt(SQW_PIN), onSQWInterrupt, FALLING);
+            sqwInterruptAttached = true;
+        }
         Serial.print("\n[SYSTEM] Используется прерывание от DS3231");
     } else {
         // Работаем от внутреннего RTC - НЕ используем прерывания
-        // Просто отключаем SQW если был подключен
-        detachInterrupt(digitalPinToInterrupt(SQW_PIN));
+        // Отключаем SQW только если ранее действительно подключали ISR
+        if (sqwInterruptAttached) {
+            detachInterrupt(digitalPinToInterrupt(SQW_PIN));
+            sqwInterruptAttached = false;
+        }
         Serial.print("\n[SYSTEM] Отчет прерываний по внутреннему счёту ESP32 [мсек]");
     }
     

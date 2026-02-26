@@ -7,21 +7,27 @@
 #include "alarm_handler.h"
 #include "dfplayer_manager.h"
 #include "ble_terminal.h"
+#include "display/nixie_6_spi.h"
 #include <esp_system.h>
 
 static bool sqwFailed = false;
 extern bool printEnabled;
+static Nixie6SpiDriver nixie6Display(HSPI_CS_PIN, HSPI_SCK_PIN, HSPI_MOSI_PIN);
 
 void processSecondTick();
 
 void setup() {
     delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
+    nixie6Display.begin();
     Serial.printf("\n[BOOT] reset reason: %d", (int)esp_reset_reason());
     initConfiguration();
     initNTPClient();
     checkTimeSource(); 
     printDS3231Temperature();
+
+    // BLE включен по умолчанию (команды ble on/off остаются рабочими)
+    bleTerminalEnable();
 
     // initDFPlayer(); // времено отключено для теста
     
@@ -53,9 +59,9 @@ void loop() {
         String bleCommand = bleTerminalReadCommand();
         bleCommand.trim();
         if (bleCommand.length() > 0) {
-            bleTerminalLog(String("\n[BLE] > ") + bleCommand + "\n");
+            bleTerminalLog(String("\n[Bluetooth] > ") + bleCommand + "\n");
             handleCommand(bleCommand);
-            bleTerminalLog("[BLE] OK\n");
+            bleTerminalLog("[Bluetooth] OK\n");
         }
     }
  
@@ -117,6 +123,14 @@ void processSecondTick() {
     struct tm local_tm_info;
     gmtime_r(&localTime, &local_tm_info);
     uint8_t currentSecond = tm_info->tm_sec;
+
+    // Обновление кадра дисплея (8 бит статуса + 6 нибблов)
+    nixie6Display.updateFromLocalTime(local_tm_info);
+    nixie6Display.setAlarm1(config.alarm1.hour, config.alarm1.minute);
+    nixie6Display.setAlarm2(config.alarm2.hour, config.alarm2.minute);
+    nixie6Display.tick(millis());
+    nixie6Display.pushFrame();
+    const uint32_t frame = nixie6Display.packedFrame();
     
     // Индикация работы
     if (printEnabled) {
@@ -131,6 +145,11 @@ void processSecondTick() {
                 Serial.print("\n[WARN] SQW не доступен");    
             }
             printTime();
+            const uint8_t status = static_cast<uint8_t>((frame >> 24) & 0xFF);
+            const uint8_t hh = static_cast<uint8_t>((frame >> 16) & 0xFF);
+            const uint8_t mm = static_cast<uint8_t>((frame >> 8) & 0xFF);
+            const uint8_t ss = static_cast<uint8_t>(frame & 0xFF);
+            Serial.printf("\n [DISP] 0x%02X %02X:%02X:%02X", status, hh, mm, ss);
         }
     }
     

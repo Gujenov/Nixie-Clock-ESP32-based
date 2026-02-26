@@ -11,3 +11,5 @@ bool bleTerminalHasCommand();
 String bleTerminalReadCommand();
 
 void bleTerminalLog(const String &message);
+void bleTerminalSetDebug(bool enabled);
+bool bleTerminalIsDebugEnabled();

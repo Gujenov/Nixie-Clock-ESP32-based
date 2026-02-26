@@ -13,12 +13,15 @@ constexpr const char* NUS_TX_UUID      = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 
 BLEServer* bleServer = nullptr;
 BLECharacteristic* txCharacteristic = nullptr;
+BLECharacteristic* rxCharacteristic = nullptr;
 bool bleEnabled = false;
 volatile bool bleConnected = false;
 volatile bool bleWelcomePending = false;
 volatile bool bleDisconnectPending = false;
+volatile bool bleEnableAnnouncePending = false;
 unsigned long bleLastHeartbeatMs = 0;
 constexpr unsigned long BLE_HEARTBEAT_INTERVAL_MS = 5000;
+bool bleDebugEnabled = false;
 
 String rxLineBuffer;
 
@@ -32,13 +35,31 @@ portMUX_TYPE bleQueueMux = portMUX_INITIALIZER_UNLOCKED;
 void enqueueCommand(const String& cmd) {
     if (cmd.length() == 0) return;
 
+    bool queued = false;
     portENTER_CRITICAL(&bleQueueMux);
     if (queueCount < COMMAND_QUEUE_SIZE) {
         commandQueue[queueTail] = cmd;
         queueTail = (queueTail + 1) % COMMAND_QUEUE_SIZE;
         queueCount++;
+        queued = true;
     }
     portEXIT_CRITICAL(&bleQueueMux);
+
+    if (queued && bleDebugEnabled) {
+        Serial.printf("\n[BLE-DBG] enqueue: '%s'", cmd.c_str());
+    }
+
+    if (!queued) {
+        Serial.printf("\n[Bluetooth] RX queue full, drop: '%s'", cmd.c_str());
+    }
+}
+
+void flushRxLineBufferToQueue() {
+    rxLineBuffer.trim();
+    if (rxLineBuffer.length() > 0) {
+        enqueueCommand(rxLineBuffer);
+        rxLineBuffer = "";
+    }
 }
 
 class ServerCallbacks : public BLEServerCallbacks {
@@ -63,33 +84,63 @@ class RxCallbacks : public BLECharacteristicCallbacks {
         if (!pCharacteristic) return;
 
         std::string value = pCharacteristic->getValue();
-        if (value.empty()) return;
+        if (value.empty()) {
+            // Fallback для клиентов/стеков, где payload доступен через getData/getLength
+            const size_t len = pCharacteristic->getLength();
+            const uint8_t* data = pCharacteristic->getData();
+            if (data && len > 0) {
+                value.assign(reinterpret_cast<const char*>(data), len);
+            }
+        }
+
+        const std::string uuid = pCharacteristic->getUUID().toString();
+        Serial.printf("\n[Bluetooth] onWrite UUID=%s, len=%u", uuid.c_str(), static_cast<unsigned>(value.size()));
+
+        if (value.empty()) {
+            Serial.print("\n[Bluetooth] onWrite payload empty");
+            return;
+        }
+
+        if (bleDebugEnabled) {
+            Serial.printf("\n[BLE-DBG] onWrite len=%u", static_cast<unsigned>(value.size()));
+            Serial.print("\n[BLE-DBG] hex:");
+            for (uint8_t b : value) {
+                Serial.printf(" %02X", b);
+            }
+        }
 
         bool gotTerminator = false;
 
-        for (char c : value) {
+        for (uint8_t b : value) {
+            char c = static_cast<char>(b);
+
             if (c == '\r' || c == '\n') {
                 gotTerminator = true;
-                rxLineBuffer.trim();
-                if (rxLineBuffer.length() > 0) {
-                    enqueueCommand(rxLineBuffer);
-                    rxLineBuffer = "";
-                }
+                flushRxLineBufferToQueue();
             } else {
-                rxLineBuffer += c;
-                if (rxLineBuffer.length() > 128) {
-                    rxLineBuffer = "";
+                // Фильтруем служебные/непечатаемые байты от мобильных приложений
+                if (b == 0) {
+                    continue;
+                }
+                if (b >= 32 && b <= 126) {
+                    rxLineBuffer += c;
+                    if (rxLineBuffer.length() > 128) {
+                        if (bleDebugEnabled) {
+                            Serial.print("\n[BLE-DBG] rx buffer overflow -> clear");
+                        }
+                        rxLineBuffer = "";
+                    }
                 }
             }
         }
 
         // Позволяем отправлять команду одним write без \n/\r
         if (!gotTerminator) {
-            rxLineBuffer.trim();
-            if (rxLineBuffer.length() > 0) {
-                enqueueCommand(rxLineBuffer);
-                rxLineBuffer = "";
-            }
+            flushRxLineBufferToQueue();
+        }
+
+        if (bleDebugEnabled) {
+            Serial.printf("\n[BLE-DBG] gotTerminator=%s", gotTerminator ? "true" : "false");
         }
     }
 };
@@ -125,15 +176,20 @@ void bleTerminalEnable() {
 
     txCharacteristic = service->createCharacteristic(
         NUS_TX_UUID,
-        BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_NOTIFY |
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_WRITE_NR
     );
     txCharacteristic->addDescriptor(new BLE2902());
 
-    BLECharacteristic* rxCharacteristic = service->createCharacteristic(
+    rxCharacteristic = service->createCharacteristic(
         NUS_RX_UUID,
         BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
     );
-    rxCharacteristic->setCallbacks(new RxCallbacks());
+    auto* rxCallbacks = new RxCallbacks();
+    rxCharacteristic->setCallbacks(rxCallbacks);
+    // Совместимость: некоторые мобильные клиенты пишут в TX, а не в RX
+    txCharacteristic->setCallbacks(rxCallbacks);
 
     service->start();
 
@@ -148,9 +204,10 @@ void bleTerminalEnable() {
     bleConnected = false;
     bleWelcomePending = false;
     bleDisconnectPending = false;
+    bleEnableAnnouncePending = true;
     bleLastHeartbeatMs = millis();
 
-    Serial.println("[Bluetooth] Включен (NUS), ожидаю подключение телефона");
+    Serial.println("[Bluetooth] Активирован, ожидаю подключение телефона");
 }
 
 void bleTerminalDisable() {
@@ -164,10 +221,12 @@ void bleTerminalDisable() {
 
     bleServer = nullptr;
     txCharacteristic = nullptr;
+    rxCharacteristic = nullptr;
     bleConnected = false;
     bleEnabled = false;
     bleWelcomePending = false;
     bleDisconnectPending = false;
+    bleEnableAnnouncePending = false;
     bleLastHeartbeatMs = 0;
 
     portENTER_CRITICAL(&bleQueueMux);
@@ -183,6 +242,11 @@ bool bleTerminalIsEnabled() {
 }
 
 void bleTerminalProcess() {
+    if (bleEnabled && bleEnableAnnouncePending) {
+        bleEnableAnnouncePending = false;
+        Serial.println("\n[Bluetooth] Активирован, ожидаю подключение телефона");
+    }
+
     if (bleEnabled && bleDisconnectPending) {
         bleDisconnectPending = false;
         Serial.println("\n[Bluetooth] Телефон отключен\n");
@@ -190,19 +254,19 @@ void bleTerminalProcess() {
 
     if (bleEnabled && bleConnected && bleWelcomePending) {
         bleWelcomePending = false;
-        Serial.println("\n[Bluetooth] Телефон подключен\n");
-        bleTerminalLog("\n[Bluetooth] Connected. Commands: bon, boff, reset\n");
+        Serial.println("\n[Bluetooth] Телефон подключен");
+        bleTerminalLog("\n[Bluetooth] Connected. Write command to RX(0002) or TX(0003)");
         bleLastHeartbeatMs = millis();
     }
 
-    if (bleEnabled && bleConnected && (millis() - bleLastHeartbeatMs >= BLE_HEARTBEAT_INTERVAL_MS)) {
-        bleLastHeartbeatMs = millis();
-        bleTerminalLog("[Bluetooth] alive\n");
-    }
 }
 
 bool bleTerminalHasCommand() {
-    return queueCount > 0;
+    bool has = false;
+    portENTER_CRITICAL(&bleQueueMux);
+    has = (queueCount > 0);
+    portEXIT_CRITICAL(&bleQueueMux);
+    return has;
 }
 
 String bleTerminalReadCommand() {
@@ -216,10 +280,27 @@ String bleTerminalReadCommand() {
     }
     portEXIT_CRITICAL(&bleQueueMux);
 
+    if (bleDebugEnabled && out.length() > 0) {
+        Serial.printf("\n[BLE-DBG] dequeue: '%s'", out.c_str());
+    }
+
+    if (out.length() > 0) {
+        Serial.printf("\n[Bluetooth] RX cmd: %s", out.c_str());
+    }
+
     return out;
 }
 
 void bleTerminalLog(const String &message) {
     if (!bleEnabled || message.length() == 0) return;
     notifyChunk(message.c_str(), message.length());
+}
+
+void bleTerminalSetDebug(bool enabled) {
+    bleDebugEnabled = enabled;
+    Serial.printf("\n[BLE-DBG] %s", bleDebugEnabled ? "ON" : "OFF");
+}
+
+bool bleTerminalIsDebugEnabled() {
+    return bleDebugEnabled;
 }

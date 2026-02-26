@@ -20,13 +20,22 @@ void handleCommand(String command) {
     // Управление BLE-монитором (доступно всегда, даже внутри меню)
     if (command.equalsIgnoreCase("bon")) {
         bleTerminalEnable();
-        Serial.println("[BLE] Команды: bon / boff");
         bleTerminalLog("[BLE] enabled\n");
         return;
     }
     if (command.equalsIgnoreCase("boff")) {
         bleTerminalLog("[BLE] disabling...\n");
         bleTerminalDisable();
+        return;
+    }
+    if (command.equalsIgnoreCase("bdbg on")) {
+        bleTerminalSetDebug(true);
+        bleTerminalLog("[BLE-DBG] ON\n");
+        return;
+    }
+    if (command.equalsIgnoreCase("bdbg off")) {
+        bleTerminalLog("[BLE-DBG] OFF\n");
+        bleTerminalSetDebug(false);
         return;
     }
     if (command.equalsIgnoreCase("reset") || command.equalsIgnoreCase("rst") || command.equalsIgnoreCase("reboot")) {
