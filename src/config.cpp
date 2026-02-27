@@ -109,7 +109,7 @@ void initConfiguration() {
 void initNTPClient() {
     if (!timeClient) {
     timeClient = new NTPClient(ntpUDP, config.ntp_server_1, 0);
-    Serial.printf("\n[NTP] Клиент инициализирован с сервером: %s", config.ntp_server_1);
+    Serial.printf("\n[NTP] Клиент инициализирован. Базовый сервер: %s", config.ntp_server_1);
     }
 }
 
@@ -178,7 +178,6 @@ void setDefaultConfig() {
     // Синхронизация
     config.time_config.auto_sync_enabled = true;
     config.time_config.last_ntp_sync = 0;         // Никогда не синхронизировались
-    config.time_config.last_dcf77_sync = 0;
     config.time_config.sync_failures = 0;
     
     // Ручная настройка timezone (для опции 100)
@@ -200,7 +199,6 @@ void setDefaultConfig() {
     
     // Дополнительные настройки
     config.time_config.manual_time_set = false;
-    config.time_config.dcf77_enabled = true;      // DCF77 включён
     
     // Системные (серийный номер не сбрасываем)
     if (saved_serial[0] != '\0') {

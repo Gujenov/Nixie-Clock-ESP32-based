@@ -40,7 +40,7 @@ void enterMenuMode() {
     Serial.println("\n====================");
     Serial.println("ВНИМАНИЕ!");
     Serial.println("Устройство в режиме настройки.");
-    Serial.println("Автоматический вывод времени остановлен.");
+    Serial.println("Вывод времени в терминал остановлен.");
     Serial.println("Для выхода введите 'o'.");
     Serial.println("\nВыбор подменю 1-5:");
     Serial.println("\n1  Настройки времени и часовых поясов");
@@ -632,6 +632,10 @@ void handleAlarmMenu(String command) {
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
+
+    // После любой команды внутри меню будильников (кроме навигации)
+    // повторно показываем экран с актуальным состоянием.
+    printAlarmMenu();
 }
 
 // ======================= МЕНЮ WIFI/NTP (уровень 2) =======================
@@ -885,8 +889,12 @@ void printQuickHelp() {
     Serial.println("\n=== ОСНОВНЫЕ КОМАНДЫ ===");
 
     Serial.println("  time / t     - Текущее время");
-    Serial.println("  sync        - Синхронизировать с NTP");
     Serial.println("  menu / m     - Главное меню");
+    Serial.println("  sync         - Синхронизировать с NTP");
+
+    Serial.println("\n  Работа с беспроводными интерфейсами:\n");
+    Serial.println("  ota on/off   - Вкл/выкл OTA окно");
+    Serial.println("  ota status   - Статус OTA");
     Serial.println("  bon / boff   - Вкл/выкл BLE терминал");
     Serial.println("  bdbg on/off  - Отладка BLE приёма");
     Serial.println("  help / ?     - Это сообщение");

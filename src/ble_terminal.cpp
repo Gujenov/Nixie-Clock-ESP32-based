@@ -164,7 +164,7 @@ void notifyChunk(const char* data, size_t len) {
 
 void bleTerminalEnable() {
     if (bleEnabled) {
-        Serial.println("[Bluetooth] Уже включен");
+        Serial.println("\n [Bluetooth] Уже включен");
         return;
     }
 
@@ -207,12 +207,12 @@ void bleTerminalEnable() {
     bleEnableAnnouncePending = true;
     bleLastHeartbeatMs = millis();
 
-    Serial.println("[Bluetooth] Активирован, ожидаю подключение телефона");
+    Serial.print("\n[Bluetooth] Инициализирован");
 }
 
 void bleTerminalDisable() {
     if (!bleEnabled) {
-        Serial.println("[Bluetooth] Уже выключен");
+        Serial.println("\n[Bluetooth] Уже выключен");
         return;
     }
 
@@ -234,7 +234,7 @@ void bleTerminalDisable() {
     portEXIT_CRITICAL(&bleQueueMux);
     rxLineBuffer = "";
 
-    Serial.println("[Bluetooth] Выключен");
+    Serial.println("\n[Bluetooth] Выключен");
 }
 
 bool bleTerminalIsEnabled() {

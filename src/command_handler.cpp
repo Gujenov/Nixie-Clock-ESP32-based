@@ -6,6 +6,7 @@
 #include "menu_manager.h"
 #include "engineering_menu.h"
 #include "ble_terminal.h"
+#include "ota_manager.h"
 #include <esp_system.h>
 
 // Объявляем внешние переменные
@@ -20,29 +21,47 @@ void handleCommand(String command) {
     // Управление BLE-монитором (доступно всегда, даже внутри меню)
     if (command.equalsIgnoreCase("bon")) {
         bleTerminalEnable();
-        bleTerminalLog("[BLE] enabled\n");
+        bleTerminalLog("\n[BLE] enabled\n");
         return;
     }
     if (command.equalsIgnoreCase("boff")) {
-        bleTerminalLog("[BLE] disabling...\n");
+        bleTerminalLog("\n[BLE] disabling...\n");
         bleTerminalDisable();
         return;
     }
     if (command.equalsIgnoreCase("bdbg on")) {
         bleTerminalSetDebug(true);
-        bleTerminalLog("[BLE-DBG] ON\n");
+        bleTerminalLog("\n[BLE-DBG] ON\n");
         return;
     }
     if (command.equalsIgnoreCase("bdbg off")) {
-        bleTerminalLog("[BLE-DBG] OFF\n");
+        bleTerminalLog("\n[BLE-DBG] OFF\n");
         bleTerminalSetDebug(false);
         return;
     }
     if (command.equalsIgnoreCase("reset") || command.equalsIgnoreCase("rst") || command.equalsIgnoreCase("reboot")) {
-        Serial.println("[SYSTEM] Перезагрузка...");
-        bleTerminalLog("[BLE] rebooting...\n");
+        Serial.println("\n[SYSTEM] Перезагрузка...");
+        bleTerminalLog("\n[BLE] rebooting...");
         delay(100);
         ESP.restart();
+        return;
+    }
+    if (command.equalsIgnoreCase("ota on")) {
+        if (otaEnable()) {
+            Serial.println("\n[OTA] Режим обновления активирован");
+        }
+        return;
+    }
+    if (command.equalsIgnoreCase("ota off")) {
+        otaDisable();
+        return;
+    }
+    if (command.equalsIgnoreCase("ota status")) {
+        if (otaIsEnabled()) {
+            Serial.printf("[OTA] ON, окно: %lu сек\n", static_cast<unsigned long>(otaSecondsLeft()));
+        } else {
+            Serial.println("[OTA] OFF");
+        }
         return;
     }
 
@@ -80,6 +99,10 @@ void handleCommand(String command) {
         enterEngineeringMenu();
     }
     else if (command.equals("sync")) {
+        if (otaIsEnabled()) {
+            Serial.println("[SYNC] Заблокировано: OTA активен");
+            return;
+        }
         syncTimeAsync(true);
     }
     // Команды установки UTC времени и даты

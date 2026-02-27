@@ -92,6 +92,7 @@ static TimezonePreset manualPreset = {
     0, 0, 0, 0   // DST end
 };
 static bool manualPresetActive = false;
+static char missingPresetWarnedZone[32] = {0};
 
 // ========== ФУНКЦИИ ПОИСКА ПРЕСЕТОВ ==========
 
@@ -488,12 +489,18 @@ time_t utcToLocal(time_t utc) {
         
         if (!preset) {
             // Fallback: возвращаем UTC без изменений
-            Serial.print("\n[TZ] Ошибка: preset не найден, используется UTC");
+            if (strcmp(missingPresetWarnedZone, config.time_config.timezone_name) != 0) {
+                strlcpy(missingPresetWarnedZone, config.time_config.timezone_name, sizeof(missingPresetWarnedZone));
+                Serial.print("\n[TZ] Ошибка: preset не найден, используется UTC");
+            }
             config.time_config.current_offset = 0;
             config.time_config.current_dst_active = false;
             return utc;
         }
     }
+
+    // preset снова найден: сбрасываем флаг одноразового предупреждения
+    missingPresetWarnedZone[0] = '\0';
     
     // Вычисляем, активен ли DST сейчас (по локальным правилам)
     bool is_dst = calculateDSTStatus(utc, preset);

@@ -485,9 +485,9 @@ static void wifiSyncTask(void* param) {
     digitalWrite(LED_PIN, LOW);
     if (!success) {
         blinkError(3);
-        Serial.print("\n[SYNC] Не удалось синхронизировать время!");
+        Serial.print("\n[SYNC] Не удалось синхронизировать время!\n");
     } else {
-        Serial.println("\n[SYNC] Синхронизация успешна!");
+        Serial.println("\n[SYNC] Синхронизация успешна!\n");
     }
 
     syncLastResult = success;

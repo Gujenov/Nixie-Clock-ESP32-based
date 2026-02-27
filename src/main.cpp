@@ -7,6 +7,7 @@
 #include "alarm_handler.h"
 #include "dfplayer_manager.h"
 #include "ble_terminal.h"
+#include "ota_manager.h"
 #include "display/nixie_6_spi.h"
 #include <esp_system.h>
 
@@ -28,6 +29,7 @@ void setup() {
 
     // BLE включен по умолчанию (команды ble on/off остаются рабочими)
     bleTerminalEnable();
+    otaInit();
 
     // initDFPlayer(); // времено отключено для теста
     
@@ -55,6 +57,15 @@ void loop() {
     }
 
     bleTerminalProcess();
+    otaProcess();
+
+    // Во время передачи OTA приоритет — сетевой стек/обработчик OTA.
+    // Пропускаем тяжёлую логику цикла, чтобы не получить таймаут upload.
+    if (otaIsBusy()) {
+        delay(2);
+        return;
+    }
+
     if (bleTerminalHasCommand()) {
         String bleCommand = bleTerminalReadCommand();
         bleCommand.trim();
@@ -66,44 +77,43 @@ void loop() {
     }
  
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
-    // (ТОЛЬКО если не в режиме меню)
-    if (!inMenuMode) {
-        if (ds3231_available) {
-            if (!sqwMonitorArmed) {
-                // DS3231 только что стал доступен: даём окну контроля стартовать от "сейчас",
-                // чтобы не получить ложный WARN из-за lastSQWCheck == 0 после загрузки.
-                lastSQWCheck = currentMillis;
-                sqwFailed = false;
-                sqwMonitorArmed = true;
-            }
-
-            if (timeUpdatedFromSQW) {
-                portENTER_CRITICAL(&timerMux);
-                timeUpdatedFromSQW = false;
-                portEXIT_CRITICAL(&timerMux);
-                lastSQWCheck = currentMillis;
-                sqwFailed = false;
-                processSecondTick();
-            }
-            else if (!sqwFailed && (currentMillis - lastSQWCheck >= 3000)) {
-                sqwFailed = true;
-                Serial.print("\n[WARN] SQW не поступает 3 сек, переход на millis!");
-                lastSecondCheck = currentMillis;
-                processSecondTick();
-            }
-            else if (sqwFailed && (currentMillis - lastSecondCheck >= 1000)) {
-                lastSecondCheck = currentMillis;
-                processSecondTick();
-            }
-        }
-        else {
-            sqwMonitorArmed = false;
+    // Работает всегда, чтобы индикация на дисплее оставалась актуальной и в меню.
+    // printEnabled управляет только авто-выводом в терминал.
+    if (ds3231_available) {
+        if (!sqwMonitorArmed) {
+            // DS3231 только что стал доступен: даём окну контроля стартовать от "сейчас",
+            // чтобы не получить ложный WARN из-за lastSQWCheck == 0 после загрузки.
+            lastSQWCheck = currentMillis;
             sqwFailed = false;
-            if (currentMillis - lastSecondCheck >= 1000) {
-                lastSQWCheck = currentMillis;
-                lastSecondCheck = currentMillis;
-                processSecondTick();
-            }
+            sqwMonitorArmed = true;
+        }
+
+        if (timeUpdatedFromSQW) {
+            portENTER_CRITICAL(&timerMux);
+            timeUpdatedFromSQW = false;
+            portEXIT_CRITICAL(&timerMux);
+            lastSQWCheck = currentMillis;
+            sqwFailed = false;
+            processSecondTick();
+        }
+        else if (!sqwFailed && (currentMillis - lastSQWCheck >= 3000)) {
+            sqwFailed = true;
+            Serial.print("\n[WARN] SQW не поступает 3 сек, переход на millis!");
+            lastSecondCheck = currentMillis;
+            processSecondTick();
+        }
+        else if (sqwFailed && (currentMillis - lastSecondCheck >= 1000)) {
+            lastSecondCheck = currentMillis;
+            processSecondTick();
+        }
+    }
+    else {
+        sqwMonitorArmed = false;
+        sqwFailed = false;
+        if (currentMillis - lastSecondCheck >= 1000) {
+            lastSQWCheck = currentMillis;
+            lastSecondCheck = currentMillis;
+            processSecondTick();
         }
     }
     
@@ -157,7 +167,7 @@ void processSecondTick() {
     
     // Синхронизация
     static uint8_t lastSyncHour = 255;
-    if ((local_tm_info.tm_hour == 3 || local_tm_info.tm_hour == 15) && local_tm_info.tm_min == 5) {
+    if (!otaIsEnabled() && (local_tm_info.tm_hour == 3 || local_tm_info.tm_hour == 15) && local_tm_info.tm_min == 5) {
         if (local_tm_info.tm_hour != lastSyncHour) {
             syncTimeAsync();
             lastSyncHour = local_tm_info.tm_hour;

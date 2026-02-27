@@ -12,6 +12,12 @@
 #define TZ_BUF_SIZE 60
 #define NTP_SERVER_SIZE 32
 
+// OTA (локальная сеть)
+// Пароль обязательно поменять перед production.
+#define OTA_PASSWORD "nixie-ota"
+#define OTA_WINDOW_MS 300000UL   // 5 минут
+#define OTA_CONNECT_TIMEOUT_MS 12000UL
+
 // Конфигурация пинов
 #define LED_PIN 48
 
@@ -78,7 +84,6 @@ struct TimeConfig {
     // === СИНХРОНИЗАЦИЯ ===
     bool auto_sync_enabled;           // Автосинхронизация с NTP разрешена
     uint32_t last_ntp_sync;           // Время последней NTP синхронизации (UNIX time)
-    uint32_t last_dcf77_sync;         // Время последней DCF77 синхронизации
     uint8_t sync_failures;            // Счётчик неудачных синхронизаций
 
     // === ОФЛАЙН ПРАВИЛА (POSIX от ezTime) ===
@@ -88,7 +93,6 @@ struct TimeConfig {
     
     // === ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ ===
     bool manual_time_set;             // Время было установлено вручную
-    bool dcf77_enabled;               // Включить/выключить DCF77 приёмник
     
 };
 
