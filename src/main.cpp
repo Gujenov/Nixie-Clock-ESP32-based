@@ -121,12 +121,39 @@ void loop() {
 }
 
 void processSecondTick() {
-    static time_t lastProcessedUtc = 0;
-    time_t currentTime = getCurrentUTCTime();
-    if (currentTime == lastProcessedUtc) {
-        return;
+    static bool tickUtcInitialized = false;
+    static bool lastDsState = false;
+    static time_t tickUtc = 0;
+    static time_t lastFiveMinuteSyncMarkUtc = 0;
+
+    // Инициализация/реинициализация базового UTC из активного источника
+    if (!tickUtcInitialized || lastDsState != ds3231_available) {
+        tickUtc = getCurrentUTCTime();
+        tickUtcInitialized = true;
+        lastDsState = ds3231_available;
+    } else {
+        // Основной режим: считаем секунды локально, без чтения RTC каждую секунду
+        tickUtc += 1;
     }
-    lastProcessedUtc = currentTime;
+
+    // Контрольная сверка строго в 00 секунд каждых 5 минут: 00, 05, 10, ...
+    // Источник сверки = текущий активный источник времени (DS3231 или System RTC)
+    struct tm tickUtcTm;
+    gmtime_r(&tickUtc, &tickUtcTm);
+    if (tickUtcTm.tm_sec == 0 && (tickUtcTm.tm_min % 5) == 0 && tickUtc != lastFiveMinuteSyncMarkUtc) {
+        tickUtc = getCurrentUTCTime();
+        lastFiveMinuteSyncMarkUtc = tickUtc;
+
+        if (printEnabled) {
+            if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
+                Serial.print("\n[DS3231] Updated");
+            } else {
+                Serial.print("\n[RTC] Updated");
+            }
+        }
+    }
+
+    time_t currentTime = tickUtc;
     time_t localTime = utcToLocal(currentTime);
     
     struct tm* tm_info = gmtime(&currentTime);
@@ -141,6 +168,7 @@ void processSecondTick() {
     nixie6Display.tick(millis());
     nixie6Display.pushFrame();
     const uint32_t frame = nixie6Display.packedFrame();
+    const uint32_t frameOutput = nixie6Display.packedFrameOutput();
     
     // Индикация работы
     if (printEnabled) {
@@ -155,11 +183,20 @@ void processSecondTick() {
                 Serial.print("\n[WARN] SQW не доступен");    
             }
             printTime();
-            const uint8_t status = static_cast<uint8_t>((frame >> 24) & 0xFF);
-            const uint8_t hh = static_cast<uint8_t>((frame >> 16) & 0xFF);
-            const uint8_t mm = static_cast<uint8_t>((frame >> 8) & 0xFF);
-            const uint8_t ss = static_cast<uint8_t>(frame & 0xFF);
-            Serial.printf("\n [DISP] 0x%02X %02X:%02X:%02X", status, hh, mm, ss);
+            const bool reverseMode = (config.clock_type == CLOCK_TYPE_NIXIE &&
+                                      config.clock_digits == 6 &&
+                                      config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT);
+
+            const uint8_t status = static_cast<uint8_t>(((reverseMode ? frameOutput : frame) >> 24) & 0xFF);
+            const uint8_t hh = static_cast<uint8_t>(((reverseMode ? frameOutput : frame) >> 16) & 0xFF);
+            const uint8_t mm = static_cast<uint8_t>(((reverseMode ? frameOutput : frame) >> 8) & 0xFF);
+            const uint8_t ss = static_cast<uint8_t>((reverseMode ? frameOutput : frame) & 0xFF);
+
+            if (reverseMode) {
+                Serial.printf("\n [DISP] %02X:%02X:%02X 0x%02X", hh, mm, ss, status);
+            } else {
+                Serial.printf("\n [DISP] 0x%02X %02X:%02X:%02X", status, hh, mm, ss);
+            }
         }
     }
     

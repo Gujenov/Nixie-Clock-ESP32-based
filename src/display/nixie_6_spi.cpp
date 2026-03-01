@@ -1,4 +1,5 @@
 #include "display/nixie_6_spi.h"
+#include "config.h"
 
 Nixie6SpiDriver::Nixie6SpiDriver(uint8_t latchPin, uint8_t sckPin, uint8_t mosiPin)
     : latchPin_(latchPin), sckPin_(sckPin), mosiPin_(mosiPin) {}
@@ -199,11 +200,18 @@ Nixie6Frame Nixie6SpiDriver::currentFrame() const {
 }
 
 uint32_t Nixie6SpiDriver::packedFrame() const {
+    // Логический кадр для диагностики/отладки (без аппаратных трансформаций)
     return currentFrame().pack();
 }
 
+uint32_t Nixie6SpiDriver::packedFrameOutput() const {
+    // Кадр после преобразования режима вывода (порядок разрядов)
+    return applyOutputMode(currentFrame()).pack();
+}
+
 void Nixie6SpiDriver::pushFrame() {
-    shiftOut32(packedFrame());
+    // На шину уходит уже аппаратно-преобразованный кадр согласно режиму Nix6
+    shiftOut32(packedFrameOutput());
 }
 
 uint8_t Nixie6SpiDriver::tens(uint8_t value) {
@@ -223,14 +231,14 @@ Nixie6Frame Nixie6SpiDriver::buildTimeFrame() const {
     const uint8_t minute = static_cast<uint8_t>((localTm_.tm_min < 0) ? 0 : localTm_.tm_min % 60);
     const uint8_t second = static_cast<uint8_t>((localTm_.tm_sec < 0) ? 0 : localTm_.tm_sec % 60);
 
-    // Порядок вывода через SPI:
-    // SEC-DEC_SEC-MIN-DEC_MIN-HOURS-DEC_HOURS-DATA(0x03)
-    f.nibbles[0] = ones(second);
-    f.nibbles[1] = tens(second);
-    f.nibbles[2] = ones(minute);
-    f.nibbles[3] = tens(minute);
-    f.nibbles[4] = ones(hour);
-    f.nibbles[5] = tens(hour);
+    // Стандартный порядок (режим 1):
+    // ЧАС-МИН-СЕК + служебный байт (0x03)
+    f.nibbles[0] = tens(hour);
+    f.nibbles[1] = ones(hour);
+    f.nibbles[2] = tens(minute);
+    f.nibbles[3] = ones(minute);
+    f.nibbles[4] = tens(second);
+    f.nibbles[5] = ones(second);
     return f;
 }
 
@@ -317,6 +325,26 @@ Nixie6Frame Nixie6SpiDriver::buildTemperatureFrame() const {
     return f;
 }
 
+Nixie6Frame Nixie6SpiDriver::applyOutputMode(const Nixie6Frame& frame) const {
+    Nixie6Frame out = frame;
+
+    // Режим применяется только для Nixie 6, выбранного в инженерном меню.
+    if (config.clock_type != CLOCK_TYPE_NIXIE || config.clock_digits != 6) {
+        return out;
+    }
+
+    if (config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT) {
+        // Обратный порядок разрядов данных.
+        for (uint8_t i = 0; i < 6; ++i) {
+            const uint8_t src = frame.nibbles[5 - i] & 0x0F;
+            out.nibbles[i] = src;
+        }
+    }
+
+    // NIX6_OUTPUT_STD: без преобразований (стандартный порядок)
+    return out;
+}
+
 void Nixie6SpiDriver::writeBit(bool value) {
     digitalWrite(mosiPin_, value ? HIGH : LOW);
     digitalWrite(sckPin_, HIGH);
@@ -336,11 +364,23 @@ void Nixie6SpiDriver::shiftOut32(uint32_t value) {
     digitalWrite(latchPin_, LOW);
     digitalWrite(sckPin_, LOW);
 
+    const bool reverseBitsInNibble =
+        (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6 &&
+         config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT);
+
     // Передаём сначала 24 бита данных (6 нибблов),
     // а служебный байт (startFlags, включая 0x03) — последним.
-    // При этом для каждого ниббла порядок бит разворачиваем: b3 b2 b1 b0 -> b0 b1 b2 b3.
-    auto writeNibbleReversed = [this](uint8_t nibble) {
-        for (uint8_t bit = 0; bit < 4; ++bit) {
+    // Режим 1: прямые биты (b3..b0), режим 2: обратные биты (b0..b3).
+    auto writeNibbleByMode = [this, reverseBitsInNibble](uint8_t nibble) {
+        if (reverseBitsInNibble) {
+            for (uint8_t bit = 0; bit < 4; ++bit) {
+                const bool b = ((nibble >> bit) & 0x1U) != 0;
+                writeBit(b);
+            }
+            return;
+        }
+
+        for (int8_t bit = 3; bit >= 0; --bit) {
             const bool b = ((nibble >> bit) & 0x1U) != 0;
             writeBit(b);
         }
@@ -348,12 +388,12 @@ void Nixie6SpiDriver::shiftOut32(uint32_t value) {
 
     // 6 нибблов данных: bits [23:0]
     for (int8_t shift = 20; shift >= 0; shift -= 4) {
-        writeNibbleReversed(static_cast<uint8_t>((value >> shift) & 0x0FU));
+        writeNibbleByMode(static_cast<uint8_t>((value >> shift) & 0x0FU));
     }
 
     // 2 ниббла служебного байта: bits [31:24]
     for (int8_t shift = 28; shift >= 24; shift -= 4) {
-        writeNibbleReversed(static_cast<uint8_t>((value >> shift) & 0x0FU));
+        writeNibbleByMode(static_cast<uint8_t>((value >> shift) & 0x0FU));
     }
 
     digitalWrite(mosiPin_, LOW);

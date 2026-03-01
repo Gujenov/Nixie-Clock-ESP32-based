@@ -5,6 +5,8 @@
 #include "hardware.h"
 #include "alarm_handler.h"
 #include <Arduino.h> 
+#include <esp_partition.h>
+#include <esp_ota_ops.h>
 
 extern bool printEnabled;
 
@@ -19,6 +21,31 @@ void enableAutoTimezone();
 void disableAutoTimezone();
 void enableAutoSync();
 void disableAutoSync();
+
+static const char* getClockTypeLabelForInfo() {
+    switch (config.clock_type) {
+        case CLOCK_TYPE_NIXIE:
+            switch (config.clock_digits) {
+                case 1: return "Nix 1";
+                case 2: return "Nix 2";
+                case 4: return "Nix 4";
+                case 6: return "Nix 6";
+                default: return "Nix (unknown digits)";
+            }
+        case CLOCK_TYPE_NIXIE_HAND: return "Nix hand";
+        case CLOCK_TYPE_CYCLOTRON: return "Cycl";
+        case CLOCK_TYPE_VERTICAL: return "Vert";
+        case CLOCK_TYPE_MECH_2: return "Mech 2";
+        case CLOCK_TYPE_MECH_PEND: return "Mech pend";
+        default: return "Unknown";
+    }
+}
+
+static const char* getNix6OutputModeLabelForInfo() {
+    return (config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT)
+        ? "Reverse order + reverse bits in nibble"
+        : "Standard order, direct bits";
+}
 
 static void onTimezoneActivated() {
     config.time_config.automatic_localtime = true;
@@ -767,6 +794,10 @@ void printInfoMenu() {
     Serial.println("\n=== Системная информация ===");
     Serial.printf("Версия ПО: %s\n", FIRMWARE_VERSION);
     Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
+    Serial.printf("Тип часов: %s\n", getClockTypeLabelForInfo());
+    if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
+        Serial.printf("Режим вывода Nix 6: %s\n", getNix6OutputModeLabelForInfo());
+    }
 //  Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
     Serial.printf("Источник времени: %s", 
                currentTimeSource == EXTERNAL_DS3231 ? "DS3231" : "Внутренний RTC");
@@ -784,25 +815,51 @@ void printInfoMenu() {
     // Информация о чипе
     String chipModel = ESP.getChipModel();
     Serial.printf("\nESP-ROM: %s", chipModel.c_str());
+    Serial.printf("\nModule: %s", "ESP32-S3-WROOM-1");
     Serial.printf("\nCPU Частота: %d MHz\n", ESP.getCpuFreqMHz());
 
     Serial.printf("IDF версия: %s\n", esp_get_idf_version());
     Serial.printf("Cores: %d\n", ESP.getChipCores());
     Serial.printf("Revision: %d\n", ESP.getChipRevision());
     
-    // Информация о флеш памяти
+    // Информация о флеш и разделах (с учетом OTA)
     uint32_t flashSize = ESP.getFlashChipSize();
     uint32_t sketchSize = ESP.getSketchSize();
-    uint32_t freeSketch = ESP.getFreeSketchSpace();
-    uint32_t appPartition = sketchSize + freeSketch;
+    const esp_partition_t* runningPart = esp_ota_get_running_partition();
+    const esp_partition_t* nextOtaPart = esp_ota_get_next_update_partition(nullptr);
+
+    uint32_t appVolume = runningPart ? static_cast<uint32_t>(runningPart->size) : (sketchSize + ESP.getFreeSketchSpace());
+    uint32_t otaVolume = nextOtaPart ? static_cast<uint32_t>(nextOtaPart->size) : 0;
+    uint32_t appFree = (appVolume > sketchSize) ? (appVolume - sketchSize) : 0;
+
+    uint32_t totalAppPartitions = 0;
+    uint32_t totalDataPartitions = 0;
+    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+    while (it != nullptr) {
+        const esp_partition_t* p = esp_partition_get(it);
+        if (p) totalAppPartitions += static_cast<uint32_t>(p->size);
+        it = esp_partition_next(it);
+    }
+    esp_partition_iterator_release(it);
+
+    it = esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+    while (it != nullptr) {
+        const esp_partition_t* p = esp_partition_get(it);
+        if (p) totalDataPartitions += static_cast<uint32_t>(p->size);
+        it = esp_partition_next(it);
+    }
+    esp_partition_iterator_release(it);
 
     Serial.printf("\nFlash Size: %lu MB\n", static_cast<unsigned long>(flashSize / (1024 * 1024)));
-    Serial.printf("App partition size: %.2f MB\n", appPartition / (1024.0 * 1024.0));
+    Serial.printf("OTA volume: %.2f MB\n", otaVolume / (1024.0 * 1024.0));
+    Serial.printf("Application volume: %.2f MB\n", appVolume / (1024.0 * 1024.0));
     Serial.printf("Sketch size: %.2f MB\n", sketchSize / (1024.0 * 1024.0));
-    Serial.printf("App free space: %.2f MB\n", freeSketch / (1024.0 * 1024.0));
+    Serial.printf("App free space: %.2f MB\n", appFree / (1024.0 * 1024.0));
 
-    float appUsage = (appPartition > 0) ? ((sketchSize * 100.0f) / appPartition) : 0.0f;
+    float appUsage = (appVolume > 0) ? ((sketchSize * 100.0f) / appVolume) : 0.0f;
     Serial.printf("App usage: %.1f%%\n", appUsage);
+    Serial.printf("Total APP partitions: %.2f MB\n", totalAppPartitions / (1024.0 * 1024.0));
+    Serial.printf("Total DATA partitions: %.2f MB\n", totalDataPartitions / (1024.0 * 1024.0));
     
     printMappingMenuCommands();  //Управление меню    
     

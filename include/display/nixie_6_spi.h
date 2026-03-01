@@ -66,6 +66,7 @@ public:
     Nixie6View currentView() const;
     Nixie6Frame currentFrame() const;
     uint32_t packedFrame() const;
+    uint32_t packedFrameOutput() const;
 
     // Вывод кадра в 74HC595
     void pushFrame();
@@ -109,6 +110,7 @@ private:
     Nixie6Frame buildPressureFrame() const;
     Nixie6Frame buildHumidityFrame() const;
     Nixie6Frame buildTemperatureFrame() const;
+    Nixie6Frame applyOutputMode(const Nixie6Frame& frame) const;
     uint8_t statusFlagsWithSeparators() const;
 
     void writeBit(bool value);
