@@ -8,21 +8,21 @@
 #include "dfplayer_manager.h"
 #include "ble_terminal.h"
 #include "ota_manager.h"
-#include "display/nixie_6_spi.h"
+#include "display/display_manager.h"
 #include <esp_system.h>
 
 static bool sqwFailed = false;
 extern bool printEnabled;
-static Nixie6SpiDriver nixie6Display(HSPI_CS_PIN, HSPI_SCK_PIN, HSPI_MOSI_PIN);
+static DisplayManager displayManager;
 
 void processSecondTick();
 
 void setup() {
     delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
-    nixie6Display.begin();
     Serial.printf("\n[BOOT] reset reason: %d", (int)esp_reset_reason());
     initConfiguration();
+    displayManager.begin();
     initNTPClient();
     checkTimeSource(); 
     printDS3231Temperature();
@@ -161,14 +161,14 @@ void processSecondTick() {
     gmtime_r(&localTime, &local_tm_info);
     uint8_t currentSecond = tm_info->tm_sec;
 
-    // Обновление кадра дисплея (8 бит статуса + 6 нибблов)
-    nixie6Display.updateFromLocalTime(local_tm_info);
-    nixie6Display.setAlarm1(config.alarm1.hour, config.alarm1.minute);
-    nixie6Display.setAlarm2(config.alarm2.hour, config.alarm2.minute);
-    nixie6Display.tick(millis());
-    nixie6Display.pushFrame();
-    const uint32_t frame = nixie6Display.packedFrame();
-    const uint32_t frameOutput = nixie6Display.packedFrameOutput();
+    // Универсальное обновление дисплея по политике типа часов
+    if (displayManager.shouldUpdateOnSecond(currentSecond)) {
+        displayManager.updateFromLocalTime(local_tm_info, millis(),
+                                           config.alarm1.hour, config.alarm1.minute,
+                                           config.alarm2.hour, config.alarm2.minute);
+    }
+
+    const DisplayDebugInfo dispDbg = displayManager.getDebugInfo();
     
     // Индикация работы
     if (printEnabled) {
@@ -183,19 +183,14 @@ void processSecondTick() {
                 Serial.print("\n[WARN] SQW не доступен");    
             }
             printTime();
-            const bool reverseMode = (config.clock_type == CLOCK_TYPE_NIXIE &&
-                                      config.clock_digits == 6 &&
-                                      config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT);
-
-            const uint8_t status = static_cast<uint8_t>(((reverseMode ? frameOutput : frame) >> 24) & 0xFF);
-            const uint8_t hh = static_cast<uint8_t>(((reverseMode ? frameOutput : frame) >> 16) & 0xFF);
-            const uint8_t mm = static_cast<uint8_t>(((reverseMode ? frameOutput : frame) >> 8) & 0xFF);
-            const uint8_t ss = static_cast<uint8_t>((reverseMode ? frameOutput : frame) & 0xFF);
-
-            if (reverseMode) {
-                Serial.printf("\n [DISP] %02X:%02X:%02X 0x%02X", hh, mm, ss, status);
+            if (!dispDbg.available) {
+                Serial.printf("\n [DISP] backend not implemented for type=%u digits=%u",
+                              static_cast<unsigned>(config.clock_type),
+                              static_cast<unsigned>(config.clock_digits));
+            } else if (dispDbg.reverseFormat) {
+                Serial.printf("\n [DISP] %02X:%02X:%02X 0x%02X", dispDbg.hh, dispDbg.mm, dispDbg.ss, dispDbg.status);
             } else {
-                Serial.printf("\n [DISP] 0x%02X %02X:%02X:%02X", status, hh, mm, ss);
+                Serial.printf("\n [DISP] 0x%02X %02X:%02X:%02X", dispDbg.status, dispDbg.hh, dispDbg.mm, dispDbg.ss);
             }
         }
     }

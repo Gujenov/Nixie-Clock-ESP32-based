@@ -14,6 +14,8 @@ bool g_otaEnabled = false;
 bool g_wifiOwnedByOta = false;
 unsigned long g_windowDeadlineMs = 0;
 bool g_bleWasEnabledBeforeOta = false;
+bool g_otaDisableInProgress = false;
+bool g_restoreBlePending = false;
 
 bool connectWifiForOta() {
     if (WiFi.status() == WL_CONNECTED) {
@@ -33,8 +35,8 @@ bool connectWifiForOta() {
     };
 
     Cred creds[2] = {
-        {config.wifi_ssid, config.wifi_pass, "WiFi 1"},
-        {config.wifi_ssid_2, config.wifi_pass_2, "WiFi 2"}
+        {config.wifi_ssid, config.wifi_pass, "1"},
+        {config.wifi_ssid_2, config.wifi_pass_2, "2"}
     };
 
     const uint32_t deadline = millis() + OTA_CONNECT_TIMEOUT_MS;
@@ -44,7 +46,7 @@ bool connectWifiForOta() {
             continue;
         }
 
-        Serial.printf("\n[OTA] Подключение к %s: %s", c.label, c.ssid);
+        Serial.printf("\n[OTA] -> [WiFi] Подключение к сети %s: %s", c.label, c.ssid);
         WiFi.begin(c.ssid, c.pass);
 
         while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
@@ -54,7 +56,7 @@ bool connectWifiForOta() {
 
         if (WiFi.status() == WL_CONNECTED) {
             g_wifiOwnedByOta = true;
-            Serial.printf("\n[OTA] WiFi подключен: %s, IP: %s", c.ssid, WiFi.localIP().toString().c_str());
+            Serial.printf("\n[OTA] -> [WiFi] Подключено к: %s", c.ssid);
             return true;
         }
 
@@ -143,7 +145,8 @@ bool otaEnable(uint32_t windowMs) {
     g_otaEnabled = true;
     g_windowDeadlineMs = millis() + windowMs;
 
-    Serial.printf("\n[OTA] READY: %s.local (%s)", host.c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("\n[OTA] READY: %s IP: %s", host.c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("\n[OTA] Password: %s", OTA_PASSWORD);
     Serial.printf("\n[OTA] Окно обновления: %lu сек", static_cast<unsigned long>(windowMs / 1000UL));
     return true;
 }
@@ -153,25 +156,58 @@ void otaDisable() {
         return;
     }
 
+    if (g_otaDisableInProgress) {
+        return;
+    }
+    g_otaDisableInProgress = true;
+
+    // Во время активной передачи не форсируем stop, чтобы не повиснуть в сетевом стеке.
+    if (g_otaBusy) {
+        Serial.print("\n[OTA] Нельзя выключить во время передачи");
+        g_otaDisableInProgress = false;
+        return;
+    }
+
     g_otaEnabled = false;
     g_otaBusy = false;
     g_windowDeadlineMs = 0;
 
     if (g_wifiOwnedByOta) {
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_OFF);
+        // Безопасный shutdown WiFi без принудительного WIFI_OFF (избегаем зависаний на некоторых S3)
+        WiFi.disconnect(false, false);
+
+        const unsigned long t0 = millis();
+        while (WiFi.status() == WL_CONNECTED && (millis() - t0) < 1200UL) {
+            delay(20);
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.print("\n[OTA] WiFi оставлен подключенным (safe-off)");
+        } else {
+            Serial.print("\n[OTA] WiFi отключен");
+        }
+
         g_wifiOwnedByOta = false;
     }
 
     if (g_bleWasEnabledBeforeOta) {
-        bleTerminalEnable();
-        g_bleWasEnabledBeforeOta = false;
+        // Восстанавливаем BLE отложенно в otaProcess(), чтобы избежать тяжёлой деинициализации в этом же стеке.
+        g_restoreBlePending = true;
     }
 
     Serial.print("\n[OTA] OFF");
+    g_otaDisableInProgress = false;
 }
 
 void otaProcess() {
+    if (g_restoreBlePending) {
+        g_restoreBlePending = false;
+        if (!bleTerminalIsEnabled()) {
+            bleTerminalEnable();
+        }
+        g_bleWasEnabledBeforeOta = false;
+    }
+
     if (!g_otaEnabled) {
         return;
     }

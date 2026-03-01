@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
+#include <time.h>
+#include "config.h"
 
 // Базовый интерфейс дисплея
 class DisplayDriver {
@@ -13,14 +15,78 @@ public:
 };
 
 // Менеджер дисплея (пока один драйвер)
+enum class DisplayTickMode : uint8_t {
+    EverySecond = 0,
+    EveryMinute,
+    EventOnly
+};
+
+enum class DisplayAction : uint8_t {
+    None = 0,
+    NextMainView,      // Переключение основной ветки (time/date/alarm...)
+    NextAuxView,       // Переключение вспомогательной ветки
+    EnterEditMode,     // Вход в режим редактирования
+    ExitEditMode,      // Выход из режима редактирования
+    TestPattern        // Тестовый шаблон
+};
+
+struct DisplayDebugInfo {
+    bool available = false;
+    bool reverseFormat = false; // true => печатать как HH:MM:SS 0xSTATUS
+    uint8_t status = 0;
+    uint8_t hh = 0;
+    uint8_t mm = 0;
+    uint8_t ss = 0;
+};
+
 class DisplayManager {
 public:
-    void attach(DisplayDriver* driver);
     void begin();
     void setBrightness(uint8_t level);
     void showTime(uint8_t hours, uint8_t minutes, uint8_t seconds, bool showColon);
     void testPattern();
 
+    // Универсальный апдейт из processSecondTick()
+    void updateFromLocalTime(const tm& localTm, uint32_t nowMs,
+                             uint8_t alarm1Hour, uint8_t alarm1Minute,
+                             uint8_t alarm2Hour, uint8_t alarm2Minute);
+
+    // Политика выполнения тика для разных типов часов
+    bool shouldUpdateOnSecond(uint8_t second) const;
+    DisplayTickMode tickMode() const;
+
+    // Единая диагностика выводимого кадра
+    DisplayDebugInfo getDebugInfo() const;
+
+    // Слой событий для кнопок/энкодера
+    bool handleAction(DisplayAction action);
+
+    bool hasActiveDriver() const;
+    const char* activeBackendName() const;
+
 private:
+    enum class ActiveBackend : uint8_t {
+        None = 0,
+        Nixie6,
+        NixieGeneric,
+        NixieHand,
+        Cyclotron,
+        Vertical,
+        Mech2,
+        MechPend
+    };
+
+    void attach(DisplayDriver* driver);
+
     DisplayDriver* driver_ = nullptr;
+    ActiveBackend activeBackend_ = ActiveBackend::None;
+    bool isNixie6_ = false;
+    DisplayTickMode tickMode_ = DisplayTickMode::EverySecond;
+
+    // Debug fallback для backend'ов-заглушек
+    uint8_t debugStatus_ = 0x00;
+    uint8_t debugHh_ = 0;
+    uint8_t debugMm_ = 0;
+    uint8_t debugSs_ = 0;
+    bool debugAvailable_ = false;
 };
