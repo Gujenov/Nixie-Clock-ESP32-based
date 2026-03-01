@@ -95,7 +95,7 @@ void handleCommand(String command) {
     else if (command.equals("menu") || command.equals("m")) {
         enterMenuMode();
     }
-    else if (command.equals("d")) {
+    else if (command.equals("em")) {
         enterEngineeringMenu();
     }
     else if (command.equals("sync")) {

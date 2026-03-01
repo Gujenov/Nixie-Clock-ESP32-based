@@ -33,8 +33,8 @@ bool connectWifiForOta() {
     };
 
     Cred creds[2] = {
-        {config.wifi_ssid, config.wifi_pass, "WiFi#1"},
-        {config.wifi_ssid_2, config.wifi_pass_2, "WiFi#2"}
+        {config.wifi_ssid, config.wifi_pass, "WiFi 1"},
+        {config.wifi_ssid_2, config.wifi_pass_2, "WiFi 2"}
     };
 
     const uint32_t deadline = millis() + OTA_CONNECT_TIMEOUT_MS;

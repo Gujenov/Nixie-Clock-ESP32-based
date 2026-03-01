@@ -68,6 +68,9 @@ void initConfiguration() {
     if (config.clock_type > CLOCK_TYPE_MECH_PEND) {
       config.clock_type = CLOCK_TYPE_NIXIE;
     }
+    if (config.nix6_output_mode > NIX6_OUTPUT_REVERSE_INVERT) {
+      config.nix6_output_mode = NIX6_OUTPUT_STD;
+    }
 
     // Инициализация новых полей будильников
     if (config.alarm1.melody == 0) config.alarm1.melody = 1;
@@ -101,6 +104,10 @@ void initConfiguration() {
   }
   if (config.ntp_server_3[0] == '\0') {
     strlcpy(config.ntp_server_3, "time.cloudflare.com", sizeof(config.ntp_server_3));
+  }
+
+  if (config.nix6_output_mode > NIX6_OUTPUT_REVERSE_INVERT) {
+    config.nix6_output_mode = NIX6_OUTPUT_STD;
   }
 
   initNTPClient();
@@ -155,6 +162,7 @@ void setDefaultConfig() {
 
   ClockType saved_clock_type = config.clock_type;
   uint8_t saved_clock_digits = config.clock_digits;
+  Nix6OutputMode saved_nix6_output_mode = config.nix6_output_mode;
 
   memset(&config, 0, sizeof(config));
     
@@ -217,6 +225,12 @@ void setDefaultConfig() {
       config.clock_digits = saved_clock_digits;
     } else {
       config.clock_digits = 6;
+    }
+
+    if (saved_nix6_output_mode <= NIX6_OUTPUT_REVERSE_INVERT) {
+      config.nix6_output_mode = saved_nix6_output_mode;
+    } else {
+      config.nix6_output_mode = NIX6_OUTPUT_STD;
     }
     
     // Будильники

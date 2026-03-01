@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260227"
+#define FIRMWARE_VERSION "1.A0.3.260301"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -57,6 +57,11 @@ enum ClockType : uint8_t {
     CLOCK_TYPE_VERTICAL,
     CLOCK_TYPE_MECH_2,
     CLOCK_TYPE_MECH_PEND
+};
+
+enum Nix6OutputMode : uint8_t {
+    NIX6_OUTPUT_STD = 0,          // ЧАС-МИН-СЕК-СЛУЖ, прямые биты
+    NIX6_OUTPUT_REVERSE_INVERT    // СЕК-МИН-ЧАС-СЛУЖ, инверсия нибблов
 };
 
 
@@ -115,6 +120,7 @@ struct Config {
     // Тип часов и количество разрядов
     ClockType clock_type;
     uint8_t clock_digits;
+    Nix6OutputMode nix6_output_mode;
     
     // Будильники
     AlarmSettings alarm1;
