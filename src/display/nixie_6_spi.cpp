@@ -47,7 +47,7 @@ void Nixie6SpiDriver::testPattern() {
     shiftOut32(f.pack());
 }
 
-void Nixie6SpiDriver::trigger1() {
+void Nixie6SpiDriver::trigger1(bool allowAlarmViews) {
     if (editPlaceholder_) {
         return;
     }
@@ -64,10 +64,10 @@ void Nixie6SpiDriver::trigger1() {
             mainMode_ = MainMode::Date;
             break;
         case MainMode::Date:
-            mainMode_ = MainMode::Alarm1;
+            mainMode_ = allowAlarmViews ? MainMode::Alarm1 : MainMode::Time;
             break;
         case MainMode::Alarm1:
-            mainMode_ = MainMode::Alarm2;
+            mainMode_ = allowAlarmViews ? MainMode::Alarm2 : MainMode::Time;
             break;
         case MainMode::Alarm2:
         default:

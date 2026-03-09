@@ -1,6 +1,7 @@
 #include "display/display_manager.h"
 #include "display/nixie_6_spi.h"
 #include "hardware.h"
+#include "platform_profile.h"
 
 namespace {
 class VirtualDisplayDriver : public DisplayDriver {
@@ -216,9 +217,10 @@ bool DisplayManager::handleAction(DisplayAction action) {
 
     if (isNixie6_) {
         auto* d = static_cast<Nixie6SpiDriver*>(driver_);
+        const bool allowAlarmViews = platformGetCapabilities().alarm_enabled;
         switch (action) {
             case DisplayAction::NextMainView:
-                d->trigger1();
+                d->trigger1(allowAlarmViews);
                 return true;
             case DisplayAction::NextAuxView:
                 d->trigger2();
@@ -269,4 +271,27 @@ const char* DisplayManager::activeBackendName() const {
         default:
             return "None";
     }
+}
+
+const char* DisplayManager::activeViewName() const {
+    if (!driver_) {
+        return "none";
+    }
+
+    if (isNixie6_) {
+        const auto* d = static_cast<const Nixie6SpiDriver*>(driver_);
+        switch (d->currentView()) {
+            case Nixie6View::DefaultTime: return "time";
+            case Nixie6View::Date: return "date";
+            case Nixie6View::Alarm1: return "al1";
+            case Nixie6View::Alarm2: return "al2";
+            case Nixie6View::Pressure: return "pressure";
+            case Nixie6View::Humidity: return "humidity";
+            case Nixie6View::Temperature: return "temperature";
+            case Nixie6View::EditPlaceholder: return "edit";
+            default: return "unknown";
+        }
+    }
+
+    return "time";
 }

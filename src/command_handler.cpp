@@ -77,6 +77,7 @@ void handleCommand(String command) {
             case MENU_TIME: handleTimeMenu(command); break;
             case MENU_ALARMS: handleAlarmMenu(command); break;
             case MENU_WIFI: handleWifiMenu(command); break;
+            case MENU_DISPLAY: handleDisplayMenu(command); break;
             case MENU_INFO: handleInfoMenu(command); break;
             case MENU_CONFIG: handleConfigMenu(command); break;
             case MENU_ENGINEERING: handleEngineeringMenu(command); break;

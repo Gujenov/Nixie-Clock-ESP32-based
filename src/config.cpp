@@ -1,6 +1,7 @@
 #include "config.h"
 #include "hardware.h"
 #include "time_utils.h"  // Для ntpUDP
+#include "platform_profile.h"
 
 WiFiUDP ntpUDP;           
 NTPClient *timeClient = nullptr;
@@ -72,6 +73,16 @@ void initConfiguration() {
       config.nix6_output_mode = NIX6_OUTPUT_STD;
     }
 
+    // Новые платформенные поля отсутствовали в старой версии структуры
+    if (stored_size < sizeof(config)) {
+      config.audio_module_enabled = true;
+      config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
+    }
+
+    if (config.ui_control_mode < UI_CONTROL_BUTTON_ONLY || config.ui_control_mode > UI_CONTROL_ENCODER_BUTTON) {
+      config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
+    }
+
     // Инициализация новых полей будильников
     if (config.alarm1.melody == 0) config.alarm1.melody = 1;
     if (config.alarm2.melody == 0) config.alarm2.melody = 1;
@@ -110,6 +121,11 @@ void initConfiguration() {
     config.nix6_output_mode = NIX6_OUTPUT_STD;
   }
 
+  if (config.ui_control_mode < UI_CONTROL_BUTTON_ONLY || config.ui_control_mode > UI_CONTROL_ENCODER_BUTTON) {
+    config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
+  }
+
+  platformRefreshCapabilities();
   initNTPClient();
 }
 
@@ -232,6 +248,9 @@ void setDefaultConfig() {
     } else {
       config.nix6_output_mode = NIX6_OUTPUT_STD;
     }
+
+    config.audio_module_enabled = true;
+    config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
     
     // Будильники
     config.alarm1 = {0, 0, false, 1, 0x7F, false};
@@ -245,4 +264,5 @@ void saveConfig() {
   preferences.begin("config", false);
   preferences.putBytes("data", &config, sizeof(config));
   preferences.end();
+  platformRefreshCapabilities();
 }

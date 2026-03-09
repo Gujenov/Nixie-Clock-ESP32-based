@@ -1,5 +1,6 @@
 #include "dfplayer_manager.h"
 #include "config.h"
+#include "platform_profile.h"
 #include <DFRobotDFPlayerMini.h>
 
 static HardwareSerial dfSerial(1);
@@ -7,6 +8,12 @@ static DFRobotDFPlayerMini dfPlayer;
 static bool dfPlayerReady = false;
 
 bool initDFPlayer() {
+    if (!platformGetCapabilities().sound_enabled) {
+        Serial.print("\n[DFP] Модуль звука отключён в инженерном меню");
+        dfPlayerReady = false;
+        return false;
+    }
+
     dfSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX_PIN, DFPLAYER_TX_PIN);
     delay(300);
 

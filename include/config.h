@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260301"
+#define FIRMWARE_VERSION "1.A0.3.260309"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -62,6 +62,12 @@ enum ClockType : uint8_t {
 enum Nix6OutputMode : uint8_t {
     NIX6_OUTPUT_STD = 0,          // ЧАС-МИН-СЕК-СЛУЖ, прямые биты
     NIX6_OUTPUT_REVERSE_INVERT    // СЕК-МИН-ЧАС-СЛУЖ, инверсия нибблов
+};
+
+enum UiControlMode : uint8_t {
+    UI_CONTROL_BUTTON_ONLY = 1,
+    UI_CONTROL_ENCODER_ONLY = 2,
+    UI_CONTROL_ENCODER_BUTTON = 3
 };
 
 
@@ -121,6 +127,10 @@ struct Config {
     ClockType clock_type;
     uint8_t clock_digits;
     Nix6OutputMode nix6_output_mode;
+
+    // Платформенные модули (включаются в инженерном меню)
+    bool audio_module_enabled;      // DFPlayer / звук / будильник
+    UiControlMode ui_control_mode;  // Наличие и тип ручного управления
     
     // Будильники
     AlarmSettings alarm1;

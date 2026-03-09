@@ -4,6 +4,7 @@
 #include "hardware.h"
 #include "time_utils.h"
 #include "ota_manager.h"
+#include "platform_profile.h"
 
 extern bool printEnabled;
 
@@ -37,6 +38,15 @@ static const char* getNix6OutputModeName(Nix6OutputMode mode) {
     }
 }
 
+static const char* getUiControlModeName(UiControlMode mode) {
+    switch (mode) {
+        case UI_CONTROL_BUTTON_ONLY: return "Кнопка";
+        case UI_CONTROL_ENCODER_ONLY: return "Энкодер";
+        case UI_CONTROL_ENCODER_BUTTON: return "Энкодер + кнопка";
+        default: return "Unknown";
+    }
+}
+
 static void printEngineeringSubmenuNavigation() {
     Serial.println("\nНавигация:");
     Serial.println("  back / b       - Назад в инженерное меню");
@@ -45,11 +55,6 @@ static void printEngineeringSubmenuNavigation() {
 }
 
 static bool handleEngineeringSubmenuNavigation(const String &command) {
-    if (handleCommonMenuCommands(command, nullptr)) {
-        engineeringSubMenu = ENG_SUBMENU_NONE;
-        return true;
-    }
-
     String cmd = command;
     cmd.trim();
     cmd.toLowerCase();
@@ -57,6 +62,11 @@ static bool handleEngineeringSubmenuNavigation(const String &command) {
     if (cmd.equals("back") || cmd.equals("b")) {
         engineeringSubMenu = ENG_SUBMENU_NONE;
         printEngineeringMenu();
+        return true;
+    }
+
+    if (handleCommonMenuCommands(command, nullptr)) {
+        engineeringSubMenu = ENG_SUBMENU_NONE;
         return true;
     }
 
@@ -73,15 +83,23 @@ static void printSerialNumberMenu() {
 
 static void printHardwareMenu() {
     Serial.println("\n=== НАСТРОЙКИ ЖЕЛЕЗА ===");
-    Serial.printf("Текущее: %s, разрядов: %d\n\n", getClockTypeName(config.clock_type), config.clock_digits);
+
+    Serial.printf("\nТекущие параметры:");
+    Serial.printf("\n%s, разрядов: %d\n", getClockTypeName(config.clock_type), config.clock_digits);
     if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
-        Serial.printf("Режим Nix 6: %s\n\n", getNix6OutputModeName(config.nix6_output_mode));
+        Serial.printf("Режим Nix 6: %s\n", getNix6OutputModeName(config.nix6_output_mode));
     }
+    Serial.printf("Аудио/будильник: %s\n", config.audio_module_enabled ? "Есть" : "Нет");
+    Serial.printf("Ручное управление: %s\n\n", getUiControlModeName(config.ui_control_mode));
+    
     Serial.println("1  Nix <кол-во>  - Nixie clock (1,2,4,6 разрядов)");
     Serial.println("2  Nix hand      - Наручные nixie (2 разряда)");
     Serial.println("3  Cycl          - Cyclotron (4 разряда вечный календарь)");
     Serial.println("4  Vert          - Вертикальная механика (столбиковая ролик-рейка)");
-    Serial.println("5  Mech pend     - Маятниковая механика");
+    Serial.println("5  Mech pend     - Маятниковая механика\n");
+
+    Serial.println("6  audio <1/0>   - Наличие DFPlayer и всех ф-й звука");
+    Serial.println("7  <1/2/3>       - button / enc / enc+button");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
@@ -212,6 +230,48 @@ static bool handleHardwareMenu(const String &command) {
         return true;
     }
 
+    if (cmd.equals("6 1") || cmd.equals("audio 1")) {
+        config.audio_module_enabled = true;
+        saveConfig();
+        Serial.println("\n[HW] Аудио/будильник: ВКЛЮЧЕНО");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("6 0") || cmd.equals("audio 0")) {
+        config.audio_module_enabled = false;
+        config.alarm1.enabled = false;
+        config.alarm2.enabled = false;
+        saveConfig();
+        Serial.println("\n[HW] Аудио/будильник: ОТКЛЮЧЕНО");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("7 1") || cmd.equals("button")) {
+        config.ui_control_mode = UI_CONTROL_BUTTON_ONLY;
+        saveConfig();
+        Serial.println("\n[HW] Ручное управление: КНОПКА");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("7 2") || cmd.equals("enc")) {
+        config.ui_control_mode = UI_CONTROL_ENCODER_ONLY;
+        saveConfig();
+        Serial.println("\n[HW] Ручное управление: ЭНКОДЕР");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("7 3") || cmd.equals("enc+button")) {
+        config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
+        saveConfig();
+        Serial.println("\n[HW] Ручное управление: ЭНКОДЕР + КНОПКА");
+        Serial.print("> ");
+        return true;
+    }
+
     Serial.println("Неизвестная команда. Введите 'help' для списка");
     Serial.print("> ");
     return true;
@@ -278,7 +338,7 @@ void enterEngineeringMenu() {
 
 void printEngineeringMenu() {
     Serial.println("\n\n=== ИНЖЕНЕРНОЕ МЕНЮ ===");
-    Serial.println("Внимание: изменение параметров может повлиять на работу устройства.");
+    Serial.println("Внимание! Изменение параметров может повлиять на работу устройства.");
     Serial.println();
     Serial.println("1  Смена серийного номера");
     Serial.println("2  Настройки железа");

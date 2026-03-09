@@ -42,7 +42,7 @@ public:
     void testPattern() override;
 
     // Навигация
-    void trigger1();  // Основная ветка: time -> date -> alarm1 -> alarm2 -> time
+    void trigger1(bool allowAlarmViews = true);  // Основная ветка: time -> date -> alarm1 -> alarm2 -> time
     void trigger2();  // Вторая ветка: pressure -> humidity -> temperature -> time
     void tick(uint32_t nowMs);
 

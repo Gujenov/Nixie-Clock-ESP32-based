@@ -10,9 +10,11 @@
 #define I2C_SDA 39
 #define I2C_SCL 40
 #define SQW_PIN 42
-#define ENC_A 7
-#define ENC_B 15
-#define ENC_BTN 18
+#define ENC_A 15
+#define ENC_B 18
+#define ENC_BTN 8
+
+#define ALARM_BTN 7
 
 // Линии для 74HC595 (SPI-подобный интерфейс, bit-bang)
 #define SR595_DATA_PIN 5   // SER / DS
@@ -39,13 +41,17 @@
 #error "Encoder pin conflict: ENC_A/ENC_B/ENC_BTN must be different GPIOs"
 #endif
 
+#if (ALARM_BTN == ENC_A) || (ALARM_BTN == ENC_B) || (ALARM_BTN == ENC_BTN)
+#warning "Pin conflict: ALARM_BTN conflicts with encoder lines/buttons (set unique GPIO for stable operation)"
+#endif
+
 #if (ENC_BTN == DFPLAYER_TX_PIN) || (ENC_BTN == DFPLAYER_RX_PIN)
 #warning "Pin conflict: ENC_BTN conflicts with DFPlayer UART pin (fix before enabling DFPlayer)"
 #endif
 
 // Жёсткая защита от использования memory GPIO в пользовательской обвязке
 #if IS_MEM_GPIO(I2C_SDA) || IS_MEM_GPIO(I2C_SCL) || IS_MEM_GPIO(SQW_PIN) || \
-	IS_MEM_GPIO(ENC_A) || IS_MEM_GPIO(ENC_B) || IS_MEM_GPIO(ENC_BTN) || \
+	IS_MEM_GPIO(ENC_A) || IS_MEM_GPIO(ENC_B) || IS_MEM_GPIO(ENC_BTN) || IS_MEM_GPIO(ALARM_BTN) || \
 	IS_MEM_GPIO(SR595_DATA_PIN) || IS_MEM_GPIO(SR595_CLK_PIN) || IS_MEM_GPIO(SR595_LATCH_PIN) || \
 	IS_MEM_GPIO(LED_PIN) || IS_MEM_GPIO(DFPLAYER_TX_PIN) || IS_MEM_GPIO(DFPLAYER_RX_PIN)
 #error "Forbidden GPIO assignment: GPIO36/37/38 are reserved for memory lines on this ESP32-S3 build"

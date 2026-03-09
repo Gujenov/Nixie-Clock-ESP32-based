@@ -63,6 +63,7 @@ public:
 
     bool hasActiveDriver() const;
     const char* activeBackendName() const;
+    const char* activeViewName() const;
 
 private:
     enum class ActiveBackend : uint8_t {

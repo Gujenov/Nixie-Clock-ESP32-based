@@ -10,6 +10,7 @@ void initInputHandler();
 
 // Обработка ввода
 uint8_t checkButton();              // Проверка кнопки (старая CheckButton)
+uint8_t checkAlarmButton();         // Проверка дополнительной кнопки ALARM_BTN
 void handleEncoderRotation();       // Обработка поворота энкодера
 void processAllInputs();            // Обработка всех входов (вызывается в loop)
 
@@ -26,4 +27,5 @@ typedef void (*ButtonCallback)(uint8_t buttonEvent);
 typedef void (*EncoderCallback)(int32_t delta, int32_t position);
 
 void setButtonCallback(ButtonCallback callback);
+void setAlarmButtonCallback(ButtonCallback callback);
 void setEncoderCallback(EncoderCallback callback);

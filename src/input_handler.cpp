@@ -11,6 +11,7 @@ static bool encoderInitialized = false;
 
 // Коллбэки (пока не используем, но на будущее)
 static ButtonCallback buttonCallback = nullptr;
+static ButtonCallback alarmButtonCallback = nullptr;
 static EncoderCallback encoderCallback = nullptr;
 
 // Существующая логика кнопки (немного рефакторим)
@@ -19,6 +20,12 @@ static bool buttonStableState = HIGH;
 static uint32_t buttonPressStartTime = 0;
 static bool longPressHandled = false;
 static bool veryLongPressHandled = false;
+
+static uint8_t alarmButtonBounceCount = 0;
+static bool alarmButtonStableState = HIGH;
+static uint32_t alarmButtonPressStartTime = 0;
+static bool alarmLongPressHandled = false;
+static bool alarmVeryLongPressHandled = false;
 
 // Инициализация
 void initInputHandler() {
@@ -79,6 +86,50 @@ uint8_t checkButton() {
     return result;
 }
 
+uint8_t checkAlarmButton() {
+    bool currentState = digitalRead(ALARM_BTN);
+    uint32_t currentTime = millis();
+    uint8_t result = BUTTON_NONE;
+
+    // Обработка антидребезга
+    if (currentState != alarmButtonStableState) {
+        alarmButtonBounceCount++;
+        if (alarmButtonBounceCount >= 3) {
+            alarmButtonStableState = currentState;
+            alarmButtonBounceCount = 0;
+
+            if (alarmButtonStableState == LOW) {
+                alarmButtonPressStartTime = currentTime;
+                alarmLongPressHandled = false;
+                alarmVeryLongPressHandled = false;
+                result = BUTTON_PRESSED;
+            }
+        }
+    } else {
+        alarmButtonBounceCount = 0;
+    }
+
+    // Проверка длинных нажатий
+    if (alarmButtonStableState == LOW) {
+        uint32_t pressDuration = currentTime - alarmButtonPressStartTime;
+
+        if (!alarmLongPressHandled && pressDuration >= 1000) {
+            alarmLongPressHandled = true;
+            result = BUTTON_LONG;
+        }
+        else if (!alarmVeryLongPressHandled && pressDuration >= 3000) {
+            alarmVeryLongPressHandled = true;
+            result = BUTTON_VERY_LONG;
+        }
+    }
+
+    if (result != BUTTON_NONE && alarmButtonCallback != nullptr) {
+        alarmButtonCallback(result);
+    }
+
+    return result;
+}
+
 // Обработка поворота энкодера
 void handleEncoderRotation() {
     if (!encoderInitialized) {
@@ -110,7 +161,8 @@ void handleEncoderRotation() {
 void processAllInputs() {
     // 1. Проверяем кнопку
     uint8_t buttonEvent = checkButton();
-    
+    uint8_t alarmButtonEvent = checkAlarmButton();
+
     // Базовая обработка кнопки (если нет коллбэка)
     if (buttonEvent != BUTTON_NONE && buttonCallback == nullptr) {
         switch (buttonEvent) {
@@ -122,6 +174,20 @@ void processAllInputs() {
                 break;
             case BUTTON_VERY_LONG:
                 Serial.print("\n[BTN] Very long press (3s)");
+                break;
+        }
+    }
+
+    if (alarmButtonEvent != BUTTON_NONE && alarmButtonCallback == nullptr) {
+        switch (alarmButtonEvent) {
+            case BUTTON_PRESSED:
+                Serial.print("\n[ALARM_BTN] Short press");
+                break;
+            case BUTTON_LONG:
+                Serial.print("\n[ALARM_BTN] Long press (1s)");
+                break;
+            case BUTTON_VERY_LONG:
+                Serial.print("\n[ALARM_BTN] Very long press (3s)");
                 break;
         }
     }
@@ -148,6 +214,10 @@ void resetEncoderPosition() {
 // Коллбэки
 void setButtonCallback(ButtonCallback callback) {
     buttonCallback = callback;
+}
+
+void setAlarmButtonCallback(ButtonCallback callback) {
+    alarmButtonCallback = callback;
 }
 
 void setEncoderCallback(EncoderCallback callback) {

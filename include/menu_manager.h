@@ -7,6 +7,7 @@ enum MenuState {
     MENU_TIME,
     MENU_ALARMS,
     MENU_WIFI,
+    MENU_DISPLAY,
     MENU_INFO,
     MENU_CONFIG,
     MENU_ENGINEERING,
@@ -26,6 +27,7 @@ void printMappingMenuCommands();
 void printTimeMenu();
 void printAlarmMenu();
 void printWifiMenu();
+void printDisplayMenu();
 void printInfoMenu();
 void printConfigMenu();
 void printEngineeringMenu();
@@ -36,6 +38,7 @@ void handleMainMenu(String command);
 void handleTimeMenu(String command);
 void handleAlarmMenu(String command);
 void handleWifiMenu(String command);
+void handleDisplayMenu(String command);
 void handleInfoMenu(String command);
 void handleConfigMenu(String command);
 void handleEngineeringMenu(String command);

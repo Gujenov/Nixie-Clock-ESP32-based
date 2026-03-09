@@ -12,10 +12,12 @@ volatile bool timeUpdatedFromSQW = false;
 static bool sqwInterruptAttached = false;
 
 void initHardware() {
-// Настройка пинов Энкодера
+// Настройка пинов Энкодера и кнопок
     pinMode(ENC_A, INPUT_PULLUP);
     pinMode(ENC_B, INPUT_PULLUP);
     pinMode(ENC_BTN, INPUT_PULLUP);
+    
+    pinMode(ALARM_BTN, INPUT_PULLUP);
 
     // Линии 74HC595: сразу переводим в выход и удерживаем в лог.0
     pinMode(SR595_DATA_PIN, OUTPUT);

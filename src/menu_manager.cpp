@@ -4,6 +4,7 @@
 #include "timezone_manager.h"
 #include "hardware.h"
 #include "alarm_handler.h"
+#include "platform_profile.h"
 #include <Arduino.h> 
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -21,6 +22,19 @@ void enableAutoTimezone();
 void disableAutoTimezone();
 void enableAutoSync();
 void disableAutoSync();
+
+static bool isAlarmFeatureEnabled() {
+    return platformGetCapabilities().alarm_enabled;
+}
+
+enum SoundSubmenuState : uint8_t {
+    SOUND_SUBMENU_ROOT = 0,
+    SOUND_SUBMENU_ALARMS,
+    SOUND_SUBMENU_CHIME,
+    SOUND_SUBMENU_EXTRA
+};
+
+static SoundSubmenuState soundSubmenuState = SOUND_SUBMENU_ROOT;
 
 static const char* getClockTypeLabelForInfo() {
     switch (config.clock_type) {
@@ -69,12 +83,15 @@ void enterMenuMode() {
     Serial.println("Устройство в режиме настройки.");
     Serial.println("Вывод времени в терминал остановлен.");
     Serial.println("Для выхода введите 'o'.");
-    Serial.println("\nВыбор подменю 1-5:");
+    soundSubmenuState = SOUND_SUBMENU_ROOT;
+
+    Serial.println("\nВыбор подменю 1-6:");
     Serial.println("\n1  Настройки времени и часовых поясов");
-    Serial.println("2  Управление будильниками");
+    Serial.println("2  Управление звуком");
     Serial.println("3  Настройки WI-FI и NTP");
-    Serial.println("4  Информация о системе");
-    Serial.println("5  Конфигурация");
+    Serial.println("4  Управление дисплеем");
+    Serial.println("5  Информация о системе");
+    Serial.println("6  Конфигурация");
     Serial.println();
 }
 
@@ -98,6 +115,12 @@ void handleMainMenu(String command) {
         printTimeMenu();
     }
     else if (command.equals("2")) {
+        if (!isAlarmFeatureEnabled()) {
+            Serial.println("Устройство не оборудовано функциями аудио");
+            return;
+        }
+
+        soundSubmenuState = SOUND_SUBMENU_ROOT;
         currentMenuState = MENU_ALARMS;
         printAlarmMenu();
     }
@@ -106,14 +129,18 @@ void handleMainMenu(String command) {
         printWifiMenu();
     }
     else if (command.equals("4")) {
+        currentMenuState = MENU_DISPLAY;
+        printDisplayMenu();
+    }
+    else if (command.equals("5")) {
         currentMenuState = MENU_INFO;
         printInfoMenu();
     }
-    else if (command.equals("5")) {
+    else if (command.equals("6")) {
         currentMenuState = MENU_CONFIG;
         printConfigMenu();
     }
-    else if (command.equals("6") || command.equals("out") || command.equals("exit")|| command.equals("o")) {
+    else if (command.equals("7") || command.equals("out") || command.equals("exit")|| command.equals("o")) {
         exitMenuMode();
     }
     else if (command.equals("help") || command.equals("?")) {
@@ -160,6 +187,12 @@ void printTimeMenu() {
 bool handleCommonMenuCommands(const String &command, void (*printMenu)()) {
     if (command.equals("menu") || command.equals("m")) {
         // Переход в главное меню
+        currentMenuState = MENU_MAIN;
+        enterMenuMode();
+        return true;
+    }
+    else if (command.equals("back") || command.equals("b")) {
+        // Универсальный возврат на уровень выше (в текущей архитектуре — в главное меню)
         currentMenuState = MENU_MAIN;
         enterMenuMode();
         return true;
@@ -421,25 +454,96 @@ static bool isDaysKeyword(const String &input) {
 }
 
 void printAlarmMenu() {
-    //Serial.println("\n=== СОСТОЯНИЕ БУДИЛЬНИКОВ ===");
-    // Показываем текущее состояние будильников
+    Serial.println("\n=== УПРАВЛЕНИЕ ЗВУКОМ ===\n");
+    Serial.println("1  Управление будильниками");
+    Serial.println("2  Настройка боя");
+    Serial.println("3  Дополнительные функции аудио");
+    printMappingMenuCommands();
+}
+
+static void printAlarmControlMenu() {
+    Serial.println("\n=== ЗВУК / БУДИЛЬНИКИ ===");
     printAlarmStatus();
-    
+
     Serial.println("\n  set al 1 [HH:MM] / sal1 [HH:MM] - время будильника 1");
     Serial.println("  al 1 sound [num] / a1s [num] - номер мелодии для будильника 1");
     Serial.println("  al 1 mode [once/daily] / a1m [o/d] - режим будильника 1 (один раз/ежедневно)");
-        Serial.println("  dis al 1 / da1 - отключить будильник 1");
+    Serial.println("  dis al 1 / da1 - отключить будильник 1");
     Serial.println("\n  set al 2 [HH:MM] / sal2 [HH:MM] - время будильника 2");
     Serial.println("  al 2 sound [num] / a2s [num] - номер мелодии для будильника 2");
     Serial.println("  al 2 days [1,2,3...7] / a2d [1,2,3...7] - срабатывание буд. 2, начиная с Пн=1 по Вс=7");
     Serial.println("  al 2 list [weekdays|weekends|all] / a2l [...] - набор дней будильника 2 (по будням, выходным, все)");
-        Serial.println("  dis al 2 / da2 - отключить будильник 2");
-    
-    printMappingMenuCommands();  //Управление меню
+    Serial.println("  dis al 2 / da2 - отключить будильник 2");
+    printMappingMenuCommands();
+}
+
+static void printSoundChimeMenu() {
+    Serial.println("\n=== ЗВУК / НАСТРОЙКА БОЯ ===");
+    Serial.println("-=В разработке=-");
+    printMappingMenuCommands();
+}
+
+static void printSoundExtraMenu() {
+    Serial.println("\n=== ЗВУК / ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ ===");
+    Serial.println("-=В разработке=-");
+    printMappingMenuCommands();
 }
 
 void handleAlarmMenu(String command) {
-    if (handleCommonMenuCommands(command, printAlarmMenu)) return;
+    if (!isAlarmFeatureEnabled()) {
+        Serial.println("Устройство не оборудовано функциями аудио");
+        currentMenuState = MENU_MAIN;
+        return;
+    }
+
+    String cmd = command;
+    cmd.trim();
+    cmd.toLowerCase();
+
+    if (soundSubmenuState == SOUND_SUBMENU_ROOT) {
+        if (handleCommonMenuCommands(command, printAlarmMenu)) return;
+
+        if (cmd.equals("1")) {
+            soundSubmenuState = SOUND_SUBMENU_ALARMS;
+            printAlarmControlMenu();
+            return;
+        }
+        if (cmd.equals("2")) {
+            soundSubmenuState = SOUND_SUBMENU_CHIME;
+            printSoundChimeMenu();
+            return;
+        }
+        if (cmd.equals("3")) {
+            soundSubmenuState = SOUND_SUBMENU_EXTRA;
+            printSoundExtraMenu();
+            return;
+        }
+
+        Serial.println("Неизвестная команда. Введите 'help' для справки");
+        return;
+    }
+
+    if (cmd.equals("back") || cmd.equals("b")) {
+        soundSubmenuState = SOUND_SUBMENU_ROOT;
+        printAlarmMenu();
+        return;
+    }
+
+    if (soundSubmenuState == SOUND_SUBMENU_CHIME) {
+        if (handleCommonMenuCommands(command, printSoundChimeMenu)) return;
+        Serial.println("-=В разработке=-");
+        printSoundChimeMenu();
+        return;
+    }
+
+    if (soundSubmenuState == SOUND_SUBMENU_EXTRA) {
+        if (handleCommonMenuCommands(command, printSoundExtraMenu)) return;
+        Serial.println("-=В разработке=-");
+        printSoundExtraMenu();
+        return;
+    }
+
+    if (handleCommonMenuCommands(command, printAlarmControlMenu)) return;
     else if (command.equalsIgnoreCase("al") || command.equalsIgnoreCase("AL") || command.equals("status")) {
         // Показать состояние будильников
         printAlarmStatus();
@@ -660,9 +764,19 @@ void handleAlarmMenu(String command) {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
 
-    // После любой команды внутри меню будильников (кроме навигации)
-    // повторно показываем экран с актуальным состоянием.
-    printAlarmMenu();
+    printAlarmControlMenu();
+}
+
+void printDisplayMenu() {
+    Serial.println("\n=== УПРАВЛЕНИЕ ДИСПЛЕЕМ ===");
+    Serial.println("-=В разработке=-");
+    printMappingMenuCommands();
+}
+
+void handleDisplayMenu(String command) {
+    if (handleCommonMenuCommands(command, printDisplayMenu)) return;
+    Serial.println("-=В разработке=-");
+    printDisplayMenu();
 }
 
 // ======================= МЕНЮ WIFI/NTP (уровень 2) =======================
@@ -791,13 +905,15 @@ void handleWifiMenu(String command) {
 
 void printInfoMenu() {
     
-    Serial.println("\n=== Системная информация ===");
+    Serial.println("\n=== Системная информация ===\n");
     Serial.printf("Версия ПО: %s\n", FIRMWARE_VERSION);
     Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
     Serial.printf("Тип часов: %s\n", getClockTypeLabelForInfo());
     if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
         Serial.printf("Режим вывода Nix 6: %s\n", getNix6OutputModeLabelForInfo());
     }
+    Serial.printf("Аудио/будильник: %s\n", config.audio_module_enabled ? "Есть" : "Нет");
+    Serial.printf("Ручное управление: %s\n", platformUiControlModeName(config.ui_control_mode));
 //  Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
     Serial.printf("Источник времени: %s", 
                currentTimeSource == EXTERNAL_DS3231 ? "DS3231" : "Внутренний RTC");
@@ -910,18 +1026,22 @@ void printConfigMenu() {
     } else {
         Serial.print("  • Локальное время: ТАБЛИЦА / НОВОЕ ПРАВИЛО DST - если есть\n");
     }
-    Serial.printf("  • Будильник 1: %s %02d:%02d, мелодия %d, %s\n",
-                  config.alarm1.enabled ? "ВКЛ" : "ВЫКЛ",
-                  config.alarm1.hour,
-                  config.alarm1.minute,
-                  config.alarm1.melody,
-                  config.alarm1.once ? "once" : "daily");
-    Serial.printf("  • Будильник 2: %s %02d:%02d, мелодия %d, дни: %s\n",
-                  config.alarm2.enabled ? "ВКЛ" : "ВЫКЛ",
-                  config.alarm2.hour,
-                  config.alarm2.minute,
-                  config.alarm2.melody,
-                  formatDays(config.alarm2.days_mask).c_str());
+    Serial.printf("  • Аудио/будильник: %s\n", config.audio_module_enabled ? "Есть" : "Нет");
+    Serial.printf("  • Ручное управление: %s\n", platformUiControlModeName(config.ui_control_mode));
+    if (isAlarmFeatureEnabled()) {
+        Serial.printf("  • Будильник 1: %s %02d:%02d, мелодия %d, %s\n",
+                      config.alarm1.enabled ? "ВКЛ" : "ВЫКЛ",
+                      config.alarm1.hour,
+                      config.alarm1.minute,
+                      config.alarm1.melody,
+                      config.alarm1.once ? "once" : "daily");
+        Serial.printf("  • Будильник 2: %s %02d:%02d, мелодия %d, дни: %s\n",
+                      config.alarm2.enabled ? "ВКЛ" : "ВЫКЛ",
+                      config.alarm2.hour,
+                      config.alarm2.minute,
+                      config.alarm2.melody,
+                      formatDays(config.alarm2.days_mask).c_str());
+    }
 
     Serial.println("\n   default  - Сбросить к настройкам по умолчанию");
 
@@ -948,6 +1068,7 @@ void printQuickHelp() {
     Serial.println("  time / t     - Текущее время");
     Serial.println("  menu / m     - Главное меню");
     Serial.println("  sync         - Синхронизировать с NTP");
+    Serial.println("  reset / rst  - Перезагрузить устройство");
 
     Serial.println("\n  Работа с беспроводными интерфейсами:\n");
     Serial.println("  ota on/off   - Вкл/выкл OTA окно");
@@ -1136,6 +1257,7 @@ void disableAutoSync() {
 
 void printMappingMenuCommands() {
     Serial.println("\nНавигация:");
+    Serial.println("  back / b      - Назад в предыдущее меню");
     Serial.println("  menu / m      - Главное меню");
     Serial.println("  out / o       - Выход из режима настройки");
     Serial.println("==========================\n");

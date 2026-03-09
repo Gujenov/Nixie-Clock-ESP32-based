@@ -2,9 +2,19 @@
 #include "config.h"
 #include "time_utils.h"
 #include "timezone_manager.h"
+#include "platform_profile.h"
+
+static bool alarmFeatureEnabled() {
+    return platformGetCapabilities().alarm_enabled;
+}
 
 // Установка будильника (общая функция)
 bool setAlarm(uint8_t alarmNum, const String &timeStr) {
+    if (!alarmFeatureEnabled()) {
+        Serial.print("\n[ALARM] Модуль будильника отключён в инженерном меню");
+        return false;
+    }
+
     int hours, minutes;
     if (sscanf(timeStr.c_str(), "%d:%d", &hours, &minutes) != 2) {
         Serial.print("\nОшибка формата. Используйте HH:MM");
@@ -36,6 +46,11 @@ bool setAlarm(uint8_t alarmNum, const String &timeStr) {
 
 // Установка номера мелодии для будильника
 bool setAlarmMelody(uint8_t alarmNum, uint8_t melody) {
+    if (!alarmFeatureEnabled()) {
+        Serial.print("\n[ALARM] Модуль будильника отключён в инженерном меню");
+        return false;
+    }
+
     if (melody == 0) {
         Serial.print("\nОшибка: номер мелодии должен быть >= 1");
         return false;
@@ -57,6 +72,11 @@ bool setAlarmMelody(uint8_t alarmNum, uint8_t melody) {
 
 // Установка режима одноразового будильника (только для будильника 1)
 bool setAlarmOnceMode(uint8_t alarmNum, bool once) {
+    if (!alarmFeatureEnabled()) {
+        Serial.print("\n[ALARM] Модуль будильника отключён в инженерном меню");
+        return false;
+    }
+
     if (alarmNum != 1) {
         Serial.print("\nОшибка: режим once доступен только для будильника 1");
         return false;
@@ -70,6 +90,11 @@ bool setAlarmOnceMode(uint8_t alarmNum, bool once) {
 
 // Установка маски дней недели (только для будильника 2)
 bool setAlarmDaysMask(uint8_t alarmNum, uint8_t daysMask) {
+    if (!alarmFeatureEnabled()) {
+        Serial.print("\n[ALARM] Модуль будильника отключён в инженерном меню");
+        return false;
+    }
+
     if (alarmNum != 2) {
         Serial.print("\nОшибка: маска дней доступна только для будильника 2");
         return false;
@@ -102,6 +127,10 @@ static String formatDaysMask(uint8_t mask) {
 
 // Проверка срабатывания будильников
 void checkAlarms() {
+    if (!alarmFeatureEnabled()) {
+        return;
+    }
+
     time_t now_utc = getCurrentUTCTime();
     if (now_utc == 0) {
         return;  // Время не получено
@@ -204,6 +233,11 @@ uint16_t getMinutesToNextAlarm() {
 
 // Функция для отключения будильника
 bool disableAlarm(uint8_t alarmNum) {
+    if (!alarmFeatureEnabled()) {
+        Serial.print("\n[ALARM] Модуль будильника отключён в инженерном меню");
+        return false;
+    }
+
     if (alarmNum == 1) {
         config.alarm1.enabled = false;
     } else if (alarmNum == 2) {
@@ -220,6 +254,11 @@ bool disableAlarm(uint8_t alarmNum) {
 
 // Функция для включения будильника
 bool enableAlarm(uint8_t alarmNum) {
+    if (!alarmFeatureEnabled()) {
+        Serial.print("\n[ALARM] Модуль будильника отключён в инженерном меню");
+        return false;
+    }
+
     if (alarmNum == 1) {
         config.alarm1.enabled = true;
     } else if (alarmNum == 2) {
@@ -236,6 +275,13 @@ bool enableAlarm(uint8_t alarmNum) {
 
 // Функция для проверки статуса будильника
 void printAlarmStatus() {
+    if (!alarmFeatureEnabled()) {
+        Serial.println("\n=== Статус будильников ===");
+        Serial.println("Модуль будильника отключён в инженерном меню");
+        Serial.print("\n=========================\n");
+        return;
+    }
+
     Serial.println("\n=== Статус будильников ===");
     
     auto printAlarmInfo = [](const AlarmSettings &alarm, uint8_t num) {

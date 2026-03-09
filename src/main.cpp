@@ -9,19 +9,95 @@
 #include "ble_terminal.h"
 #include "ota_manager.h"
 #include "display/display_manager.h"
+#include "input_handler.h"
+#include "platform_profile.h"
 #include <esp_system.h>
 
 static bool sqwFailed = false;
 extern bool printEnabled;
 static DisplayManager displayManager;
+static bool displayEditMode = false;
 
 void processSecondTick();
+
+static void handleDisplayButtonAction(uint8_t buttonEvent) {
+    const PlatformCapabilities& caps = platformGetCapabilities();
+    if (!caps.controls_enabled || !caps.button_enabled) {
+        return;
+    }
+
+    if (!caps.display_navigation_enabled) {
+        return;
+    }
+
+    switch (buttonEvent) {
+        case BUTTON_PRESSED:
+            displayManager.handleAction(DisplayAction::NextMainView);
+            break;
+        case BUTTON_LONG:
+            displayManager.handleAction(DisplayAction::NextAuxView);
+            break;
+        case BUTTON_VERY_LONG:
+            if (displayEditMode) {
+                displayManager.handleAction(DisplayAction::ExitEditMode);
+                displayEditMode = false;
+            } else {
+                displayManager.handleAction(DisplayAction::EnterEditMode);
+                displayEditMode = true;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static void onButtonEvent(uint8_t buttonEvent) {
+    handleDisplayButtonAction(buttonEvent);
+}
+
+static void onAlarmButtonEvent(uint8_t buttonEvent) {
+    handleDisplayButtonAction(buttonEvent);
+
+    switch (buttonEvent) {
+        case BUTTON_PRESSED:
+            Serial.printf("\n[ALARM_BTN] Short press - %s active", displayManager.activeViewName());
+            break;
+        case BUTTON_LONG:
+            Serial.printf("\n[ALARM_BTN] Long press (1s) - %s active", displayManager.activeViewName());
+            break;
+        case BUTTON_VERY_LONG:
+            Serial.printf("\n[ALARM_BTN] Very long press (3s) - %s active", displayManager.activeViewName());
+            break;
+        default:
+            break;
+    }
+}
+
+static void onEncoderEvent(int32_t delta, int32_t position) {
+    (void)position;
+
+    const PlatformCapabilities& caps = platformGetCapabilities();
+    if (!caps.controls_enabled || !caps.encoder_enabled) {
+        return;
+    }
+
+    if (!caps.display_navigation_enabled) {
+        return;
+    }
+
+    if (delta > 0) {
+        displayManager.handleAction(DisplayAction::NextMainView);
+    } else if (delta < 0) {
+        displayManager.handleAction(DisplayAction::NextAuxView);
+    }
+}
 
 void setup() {
     delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
     Serial.printf("\n[BOOT] reset reason: %d", (int)esp_reset_reason());
     initConfiguration();
+    platformRefreshCapabilities();
     displayManager.begin();
     initNTPClient();
     checkTimeSource(); 
@@ -38,6 +114,11 @@ void setup() {
     
     Serial.print("\n\n=== Система готова ===");
     Serial.println("\n\nhelp / ? - Перечень доступных команд");
+
+    initInputHandler();
+    setButtonCallback(onButtonEvent);
+    setAlarmButtonCallback(onAlarmButtonEvent);
+    setEncoderCallback(onEncoderEvent);
     
     // Инициализация меню (флаги уже инициализированы в menu_manager.cpp)
     printEnabled = true;
@@ -74,6 +155,11 @@ void loop() {
             handleCommand(bleCommand);
             bleTerminalLog("[Bluetooth] OK\n");
         }
+    }
+
+    const PlatformCapabilities& caps = platformGetCapabilities();
+    if (caps.controls_enabled) {
+        processAllInputs();
     }
  
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
