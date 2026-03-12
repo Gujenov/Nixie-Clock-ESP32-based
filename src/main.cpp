@@ -11,6 +11,7 @@
 #include "display/display_manager.h"
 #include "input_handler.h"
 #include "platform_profile.h"
+#include "runtime_counter.h"
 #include <esp_system.h>
 
 static bool sqwFailed = false;
@@ -97,6 +98,7 @@ void setup() {
     initHardware();
     Serial.printf("\n[BOOT] reset reason: %d", (int)esp_reset_reason());
     initConfiguration();
+    runtimeCounterInit();
     platformRefreshCapabilities();
     displayManager.begin();
     initNTPClient();
@@ -220,6 +222,8 @@ void processSecondTick() {
         // Основной режим: считаем секунды локально, без чтения RTC каждую секунду
         tickUtc += 1;
     }
+
+    runtimeCounterOnSecondTick();
 
     // Контрольная сверка строго в 00 секунд каждых 5 минут: 00, 05, 10, ...
     // Источник сверки = текущий активный источник времени (DS3231 или System RTC)

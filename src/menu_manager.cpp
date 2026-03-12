@@ -5,6 +5,7 @@
 #include "hardware.h"
 #include "alarm_handler.h"
 #include "platform_profile.h"
+#include "runtime_counter.h"
 #include <Arduino.h> 
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -904,10 +905,32 @@ void handleWifiMenu(String command) {
 // ======================= МЕНЮ ИНФОРМАЦИИ (уровень 2) =======================
 
 void printInfoMenu() {
+    auto formatYmd = [](uint32_t ymd, char* out, size_t outSize) {
+        if (ymd == 0) {
+            strlcpy(out, "не задана", outSize);
+            return;
+        }
+        uint32_t y = ymd / 10000;
+        uint32_t m = (ymd / 100) % 100;
+        uint32_t d = ymd % 100;
+        snprintf(out, outSize, "%02lu.%02lu.%04lu",
+                 static_cast<unsigned long>(d),
+                 static_cast<unsigned long>(m),
+                 static_cast<unsigned long>(y));
+    };
+
     
     Serial.println("\n=== Системная информация ===\n");
     Serial.printf("Версия ПО: %s\n", FIRMWARE_VERSION);
     Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
+
+    char lastServiceDate[24];
+    formatYmd(runtimeCounterGetLastServiceDate(), lastServiceDate, sizeof(lastServiceDate));
+    Serial.printf("1.1. Количество включений: %lu\n", static_cast<unsigned long>(runtimeCounterGetBootCount()));
+    Serial.printf("1.2. Моточасы: %.2f\n", runtimeCounterGetMotorHours());
+    Serial.printf("1.3. Дата последнего сервиса: %s\n", lastServiceDate);
+    Serial.printf("1.4. Кол-во моточасов при посл. сервисе: %.2f\n", runtimeCounterGetLastServiceMotorHours());
+
     Serial.printf("Тип часов: %s\n", getClockTypeLabelForInfo());
     if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
         Serial.printf("Режим вывода Nix 6: %s\n", getNix6OutputModeLabelForInfo());

@@ -1,4 +1,5 @@
 #include "ble_terminal.h"
+#include "audio_task.h"
 
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -250,11 +251,13 @@ void bleTerminalProcess() {
     if (bleEnabled && bleDisconnectPending) {
         bleDisconnectPending = false;
         Serial.println("\n[Bluetooth] Телефон отключен\n");
+        (void)audioPlaySfx(AudioSfxId::BleDisconnected);
     }
 
     if (bleEnabled && bleConnected && bleWelcomePending) {
         bleWelcomePending = false;
         Serial.println("\n[Bluetooth] Телефон подключен");
+        (void)audioPlaySfx(AudioSfxId::BleConnected);
         bleTerminalLog("\n[Bluetooth] Connected. Write command to RX(0002) or TX(0003)");
         bleLastHeartbeatMs = millis();
     }

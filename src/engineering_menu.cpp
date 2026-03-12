@@ -6,6 +6,7 @@
 #include "ota_manager.h"
 #include "platform_profile.h"
 #include "audio_task.h"
+#include "runtime_counter.h"
 
 extern bool printEnabled;
 
@@ -14,7 +15,8 @@ enum EngineeringSubMenu {
     ENG_SUBMENU_SERIAL,
     ENG_SUBMENU_HARDWARE,
     ENG_SUBMENU_TESTING,
-    ENG_SUBMENU_NIX6_OUTPUT
+    ENG_SUBMENU_NIX6_OUTPUT,
+    ENG_SUBMENU_COUNTERS
 };
 
 static EngineeringSubMenu engineeringSubMenu = ENG_SUBMENU_NONE;
@@ -133,6 +135,53 @@ static void printNix6OutputMenu() {
     Serial.println("   Этот вариант стоит выбрать для первого экземпляра часов,");
     Serial.println("   где порядок вывода: СЕК-МИН-ЧАС-СЛУЖ и все биты в нибблах инвертированы.");
     Serial.println("   Драйвер: 74HC595 + 6 К155ИД1");
+    printEngineeringSubmenuNavigation();
+    Serial.print("> ");
+}
+
+static uint32_t getCurrentLocalDateYmd() {
+    time_t nowUtc = getCurrentUTCTime();
+    if (nowUtc == 0) {
+        return 0;
+    }
+
+    time_t local = utcToLocal(nowUtc);
+    struct tm tmLocal;
+    gmtime_r(&local, &tmLocal);
+
+    const uint32_t y = static_cast<uint32_t>(tmLocal.tm_year + 1900);
+    const uint32_t m = static_cast<uint32_t>(tmLocal.tm_mon + 1);
+    const uint32_t d = static_cast<uint32_t>(tmLocal.tm_mday);
+    return (y * 10000UL) + (m * 100UL) + d;
+}
+
+static void printCountersMenu() {
+    auto formatYmd = [](uint32_t ymd, char* out, size_t outSize) {
+        if (ymd == 0) {
+            strlcpy(out, "не задана", outSize);
+            return;
+        }
+        uint32_t y = ymd / 10000;
+        uint32_t m = (ymd / 100) % 100;
+        uint32_t d = ymd % 100;
+        snprintf(out, outSize, "%02lu.%02lu.%04lu",
+                 static_cast<unsigned long>(d),
+                 static_cast<unsigned long>(m),
+                 static_cast<unsigned long>(y));
+    };
+
+    char lastServiceDate[24];
+    formatYmd(runtimeCounterGetLastServiceDate(), lastServiceDate, sizeof(lastServiceDate));
+
+    Serial.println("\n=== СБРОС СЧЁТЧИКОВ ===");
+    Serial.printf("\n1.1. Количество включений: %lu", static_cast<unsigned long>(runtimeCounterGetBootCount()));
+    Serial.printf("\n1.2. Моточасы: %.2f", runtimeCounterGetMotorHours());
+    Serial.printf("\n1.3. Дата последнего сервиса: %s", lastServiceDate);
+    Serial.printf("\n1.4. Кол-во моточасов при посл. сервисе: %.2f\n", runtimeCounterGetLastServiceMotorHours());
+
+    Serial.println("\n1  Провести сервис");
+    Serial.println("2  Сбросить все счётчики");
+    Serial.println("3  Выход без изменений");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
@@ -388,6 +437,50 @@ static bool handleNix6OutputMenu(const String &command) {
     return true;
 }
 
+static bool handleCountersMenu(const String &command) {
+    if (handleEngineeringSubmenuNavigation(command)) return true;
+
+    String cmd = command;
+    cmd.trim();
+    cmd.toLowerCase();
+
+    if (cmd.equals("help") || cmd.equals("?")) {
+        printCountersMenu();
+        return true;
+    }
+
+    if (cmd.equals("1") || cmd.equals("service")) {
+        uint32_t ymd = getCurrentLocalDateYmd();
+        if (runtimeCounterMarkService(ymd)) {
+            Serial.println("\n[COUNTERS] Сервис отмечен.");
+        } else {
+            Serial.println("\n[COUNTERS] Ошибка: не удалось сохранить отметку сервиса.");
+        }
+        printCountersMenu();
+        return true;
+    }
+
+    if (cmd.equals("2") || cmd.equals("reset")) {
+        if (runtimeCounterResetAll()) {
+            Serial.println("\n[COUNTERS] Все счётчики сброшены.");
+        } else {
+            Serial.println("\n[COUNTERS] Ошибка: не удалось сбросить счётчики.");
+        }
+        printCountersMenu();
+        return true;
+    }
+
+    if (cmd.equals("3") || cmd.equals("exit")) {
+        engineeringSubMenu = ENG_SUBMENU_NONE;
+        printEngineeringMenu();
+        return true;
+    }
+
+    Serial.println("Неизвестная команда. Введите 'help' для списка");
+    Serial.print("> ");
+    return true;
+}
+
 void enterEngineeringMenu() {
     inMenuMode = true;
     printEnabled = false;
@@ -407,6 +500,7 @@ void printEngineeringMenu() {
     Serial.println("1  Смена серийного номера");
     Serial.println("2  Настройки железа");
     Serial.println("3  Тестирование");
+    Serial.println("4  Сброс счётчиков");
     printMappingMenuCommands();
     Serial.print("> ");
 }
@@ -428,6 +522,10 @@ void handleEngineeringMenu(String command) {
         handleNix6OutputMenu(command);
         return;
     }
+    if (engineeringSubMenu == ENG_SUBMENU_COUNTERS) {
+        handleCountersMenu(command);
+        return;
+    }
 
     if (handleCommonMenuCommands(command, printEngineeringMenu)) return;
 
@@ -442,6 +540,10 @@ void handleEngineeringMenu(String command) {
     } else if (command.equals("3")) {
         engineeringSubMenu = ENG_SUBMENU_TESTING;
         printTestingMenu();
+        return;
+    } else if (command.equals("4")) {
+        engineeringSubMenu = ENG_SUBMENU_COUNTERS;
+        printCountersMenu();
         return;
     } else if (command.equals("time") || command.equals("t")) {
         printTime();

@@ -21,6 +21,7 @@ constexpr UBaseType_t AUDIO_TASK_PRIO = 1;
 enum class AudioCommandType : uint8_t {
     PlayTestFallback,
     PlayTestTone,
+    PlaySfx,
     Stop
 };
 
@@ -28,6 +29,7 @@ struct AudioCommand {
     AudioCommandType type;
     uint16_t freqHz;
     uint16_t durationMs;
+    uint8_t sfxId;
 };
 
 struct ToneState {
@@ -55,6 +57,12 @@ struct LoadedPcmBuffer {
 };
 
 static constexpr char FLASH_RING_WAV[] = "/ESP32_onboard_ring.wav";
+static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
+static constexpr char SFX_BLE_OFF[] = "/sfx_ble_off.wav";
+static constexpr char SFX_BLE_CONNECTED[] = "/sfx_ble_connected.wav";
+static constexpr char SFX_BLE_DISCONNECTED[] = "/sfx_ble_disconnected.wav";
+static constexpr char SFX_OK[] = "/sfx_ok.wav";
+static constexpr char SFX_ERROR[] = "/sfx_error.wav";
 static constexpr size_t MAX_TEST_AUDIO_BYTES = 512 * 1024;
 
 static TaskHandle_t g_audioTaskHandle = nullptr;
@@ -265,8 +273,32 @@ static const char* sourceName(AudioTestSource source) {
     }
 }
 
+static const char* sfxPath(AudioSfxId id) {
+    switch (id) {
+        case AudioSfxId::BleEnabled: return SFX_BLE_ON;
+        case AudioSfxId::BleDisabled: return SFX_BLE_OFF;
+        case AudioSfxId::BleConnected: return SFX_BLE_CONNECTED;
+        case AudioSfxId::BleDisconnected: return SFX_BLE_DISCONNECTED;
+        case AudioSfxId::OperationOk: return SFX_OK;
+        case AudioSfxId::OperationError: return SFX_ERROR;
+        default: return nullptr;
+    }
+}
+
+static void sfxToneFallback(AudioSfxId id, uint16_t& freq, uint16_t& duration) {
+    switch (id) {
+        case AudioSfxId::BleEnabled:      freq = 1000; duration = 120; break;
+        case AudioSfxId::BleDisabled:     freq = 600;  duration = 120; break;
+        case AudioSfxId::BleConnected:    freq = 1400; duration = 100; break;
+        case AudioSfxId::BleDisconnected: freq = 500;  duration = 140; break;
+        case AudioSfxId::OperationOk:     freq = 1200; duration = 90;  break;
+        case AudioSfxId::OperationError:  freq = 350;  duration = 180; break;
+        default:                          freq = 880;  duration = 120; break;
+    }
+}
+
 static void applyCommand(const AudioCommand& cmd, ToneState& tone, PcmPlaybackState& pcm) {
-    if ((cmd.type == AudioCommandType::PlayTestFallback || cmd.type == AudioCommandType::PlayTestTone) && !g_i2sReady) {
+    if ((cmd.type == AudioCommandType::PlayTestFallback || cmd.type == AudioCommandType::PlayTestTone || cmd.type == AudioCommandType::PlaySfx) && !g_i2sReady) {
         if (!initI2S()) {
             Serial.print("\n[AUDIO] I2S not ready, play command ignored");
             return;
@@ -322,6 +354,35 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, PcmPlaybackSt
             (void)setI2SRate(AUDIO_SAMPLE_RATE);
 
             Serial.printf("\n[AUDIO] play test tone: %u Hz, %u ms", freq, duration);
+            break;
+        }
+        case AudioCommandType::PlaySfx: {
+            tone.active = false;
+            resetPcmState(pcm);
+
+            const AudioSfxId sfx = static_cast<AudioSfxId>(cmd.sfxId);
+            const char* path = sfxPath(sfx);
+            LoadedPcmBuffer buffer;
+
+            if (path && loadWavFromFile(path, buffer) && setI2SRate(buffer.sampleRate)) {
+                pcm.samples = buffer.samples;
+                pcm.framesTotal = buffer.frames;
+                pcm.framePos = 0;
+                pcm.sampleRate = buffer.sampleRate;
+                pcm.channels = buffer.channels;
+                pcm.active = (pcm.framesTotal > 0 && pcm.samples != nullptr);
+                g_audioPlaybackActive = pcm.active;
+                Serial.printf("\n[AUDIO][SFX] source: Flash FS: %s", path);
+            } else {
+                if (buffer.samples != nullptr) {
+                    free(buffer.samples);
+                }
+                uint16_t f = 880;
+                uint16_t d = 120;
+                sfxToneFallback(sfx, f, d);
+                const AudioCommand toneCmd = { AudioCommandType::PlayTestTone, f, d, 0 };
+                applyCommand(toneCmd, tone, pcm);
+            }
             break;
         }
         case AudioCommandType::Stop:
@@ -532,7 +593,8 @@ bool audioPlayTestTone(uint16_t frequencyHz, uint16_t durationMs) {
     AudioCommand cmd = {
         AudioCommandType::PlayTestTone,
         frequencyHz,
-        durationMs
+        durationMs,
+        0
     };
 
     return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
@@ -545,6 +607,7 @@ bool audioPlayTestFallback() {
 
     AudioCommand cmd = {
         AudioCommandType::PlayTestFallback,
+        0,
         0,
         0
     };
@@ -560,10 +623,26 @@ void audioStopPlayback() {
     AudioCommand cmd = {
         AudioCommandType::Stop,
         0,
+        0,
         0
     };
 
     (void)xQueueSend(g_audioQueue, &cmd, 0);
+}
+
+bool audioPlaySfx(AudioSfxId id) {
+    if (g_audioQueue == nullptr) {
+        return false;
+    }
+
+    AudioCommand cmd = {
+        AudioCommandType::PlaySfx,
+        0,
+        0,
+        static_cast<uint8_t>(id)
+    };
+
+    return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
 }
 
 bool audioIsPlaying() {

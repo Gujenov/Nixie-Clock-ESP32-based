@@ -7,6 +7,8 @@
 #include "engineering_menu.h"
 #include "ble_terminal.h"
 #include "ota_manager.h"
+#include "audio_task.h"
+#include "runtime_counter.h"
 #include <esp_system.h>
 
 // Объявляем внешние переменные
@@ -22,10 +24,12 @@ void handleCommand(String command) {
     if (command.equalsIgnoreCase("bon")) {
         bleTerminalEnable();
         bleTerminalLog("\n[BLE] enabled\n");
+        (void)audioPlaySfx(AudioSfxId::BleEnabled);
         return;
     }
     if (command.equalsIgnoreCase("boff")) {
         bleTerminalLog("\n[BLE] disabling...\n");
+        (void)audioPlaySfx(AudioSfxId::BleDisabled);
         bleTerminalDisable();
         return;
     }
@@ -42,6 +46,7 @@ void handleCommand(String command) {
     if (command.equalsIgnoreCase("reset") || command.equalsIgnoreCase("rst") || command.equalsIgnoreCase("reboot")) {
         Serial.println("\n[SYSTEM] Перезагрузка...");
         bleTerminalLog("\n[BLE] rebooting...");
+        (void)runtimeCounterSaveNow();
         delay(100);
         ESP.restart();
         return;
@@ -139,5 +144,6 @@ void handleCommand(String command) {
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
         Serial.println("Или введите 'menu' для входа в режим настройки");
+        (void)audioPlaySfx(AudioSfxId::OperationError);
     }
 }
