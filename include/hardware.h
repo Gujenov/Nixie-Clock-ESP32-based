@@ -45,15 +45,13 @@
 #warning "Pin conflict: ALARM_BTN conflicts with encoder lines/buttons (set unique GPIO for stable operation)"
 #endif
 
-#if (ENC_BTN == DFPLAYER_TX_PIN) || (ENC_BTN == DFPLAYER_RX_PIN)
-#warning "Pin conflict: ENC_BTN conflicts with DFPlayer UART pin (fix before enabling DFPlayer)"
-#endif
-
 // Жёсткая защита от использования memory GPIO в пользовательской обвязке
 #if IS_MEM_GPIO(I2C_SDA) || IS_MEM_GPIO(I2C_SCL) || IS_MEM_GPIO(SQW_PIN) || \
 	IS_MEM_GPIO(ENC_A) || IS_MEM_GPIO(ENC_B) || IS_MEM_GPIO(ENC_BTN) || IS_MEM_GPIO(ALARM_BTN) || \
 	IS_MEM_GPIO(SR595_DATA_PIN) || IS_MEM_GPIO(SR595_CLK_PIN) || IS_MEM_GPIO(SR595_LATCH_PIN) || \
-	IS_MEM_GPIO(LED_PIN) || IS_MEM_GPIO(DFPLAYER_TX_PIN) || IS_MEM_GPIO(DFPLAYER_RX_PIN)
+	IS_MEM_GPIO(LED_PIN) || \
+	IS_MEM_GPIO(AUDIO_I2S_BCLK_PIN) || IS_MEM_GPIO(AUDIO_I2S_LRCLK_PIN) || IS_MEM_GPIO(AUDIO_I2S_DOUT_PIN) || \
+	IS_MEM_GPIO(SD_SPI_SCK_PIN) || IS_MEM_GPIO(SD_SPI_MOSI_PIN) || IS_MEM_GPIO(SD_SPI_MISO_PIN) || IS_MEM_GPIO(SD_SPI_CS_PIN)
 #error "Forbidden GPIO assignment: GPIO36/37/38 are reserved for memory lines on this ESP32-S3 build"
 #endif
 

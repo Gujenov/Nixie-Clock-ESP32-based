@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260309"
+#define FIRMWARE_VERSION "1.A0.3.260312"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -21,11 +21,16 @@
 // Конфигурация пинов
 #define LED_PIN 48
 
-// DFPlayer Mini (UART)
-// Настройте под вашу проводку
-#define DFPLAYER_TX_PIN 16  // ESP32 TX -> DFPlayer RX
-#define DFPLAYER_RX_PIN 17  // ESP32 RX -> DFPlayer TX
-#define DFPLAYER_BUSY_PIN -1 // -1 если не используется
+// Audio I2S (ESP32-S3 -> MAX98357A)
+#define AUDIO_I2S_BCLK_PIN 16   // I2S BCLK
+#define AUDIO_I2S_LRCLK_PIN 17  // I2S WS/LRCLK
+#define AUDIO_I2S_DOUT_PIN 9    // I2S DOUT (data to DAC)
+
+// microSD (SPI mode)
+#define SD_SPI_SCK_PIN 12
+#define SD_SPI_MOSI_PIN 11
+#define SD_SPI_MISO_PIN 13
+#define SD_SPI_CS_PIN 10
 
 // Настройки таймера
 #define TIMER_DIVIDER 80
@@ -45,7 +50,7 @@ struct AlarmSettings {
     uint8_t hour;
     uint8_t minute;
     bool enabled;
-    uint8_t melody;  // Номер мелодии (трек DF player)
+    uint8_t melody;  // Номер мелодии (индекс трека)
     uint8_t days_mask; // Биты дней недели для будильника 2 (Пн=0 .. Вс=6)
     bool once;         // Для будильника 1: одноразовый
 };
@@ -129,7 +134,8 @@ struct Config {
     Nix6OutputMode nix6_output_mode;
 
     // Платформенные модули (включаются в инженерном меню)
-    bool audio_module_enabled;      // DFPlayer / звук / будильник
+    bool audio_module_enabled;      // Аудио / звук / будильник
+    bool ir_sensor_enabled;         // Датчик движения (IR)
     UiControlMode ui_control_mode;  // Наличие и тип ручного управления
     
     // Будильники

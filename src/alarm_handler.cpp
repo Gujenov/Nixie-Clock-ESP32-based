@@ -276,47 +276,53 @@ bool enableAlarm(uint8_t alarmNum) {
 // Функция для проверки статуса будильника
 void printAlarmStatus() {
     if (!alarmFeatureEnabled()) {
-        Serial.println("\n=== Статус будильников ===");
-        Serial.println("Модуль будильника отключён в инженерном меню");
-        Serial.print("\n=========================\n");
+        Serial.print("\n╔═══════════════════════════════════════════════════════");
+        Serial.print("\n║                СТАТУС БУДИЛЬНИКОВ");
+        Serial.print("\n╠═══════════════════════════════════════════════════════");
+        Serial.print("\n║ Модуль будильника отключён в инженерном меню");
+        Serial.print("\n╚═══════════════════════════════════════════════════════\n");
         return;
     }
 
-    Serial.println("\n=== Статус будильников ===");
-    
-    auto printAlarmInfo = [](const AlarmSettings &alarm, uint8_t num) {
-        Serial.printf("\nБудильник %d: ", num);
-        if (alarm.enabled) {
-            if (num == 1) {
-                Serial.printf("ВКЛ %02d:%02d (мелодия %d, %s)",
-                              alarm.hour,
-                              alarm.minute,
-                              alarm.melody,
-                              alarm.once ? "once" : "daily");
-            } else {
-                Serial.printf("ВКЛ %02d:%02d (мелодия %d, дни: %s)",
-                              alarm.hour,
-                              alarm.minute,
-                              alarm.melody,
-                              formatDaysMask(alarm.days_mask).c_str());
-            }
-        } else {
-            Serial.print("ВЫКЛ");
-        }
-        Serial.print("\n");
-    };
-    
-    printAlarmInfo(config.alarm1, 1);
-    printAlarmInfo(config.alarm2, 2);
+    String alarm1Line;
+    if (config.alarm1.enabled) {
+        alarm1Line = String("Будильник 1: ВКЛ ") +
+                     String(config.alarm1.hour < 10 ? "0" : "") + String(config.alarm1.hour) + ":" +
+                     String(config.alarm1.minute < 10 ? "0" : "") + String(config.alarm1.minute) +
+                     " (мелодия " + String(config.alarm1.melody) + ", " +
+                     (config.alarm1.once ? "once" : "daily") + ")";
+    } else {
+        alarm1Line = "Будильник 1: ВЫКЛ";
+    }
+
+    String alarm2Line;
+    if (config.alarm2.enabled) {
+        alarm2Line = String("Будильник 2: ВКЛ ") +
+                     String(config.alarm2.hour < 10 ? "0" : "") + String(config.alarm2.hour) + ":" +
+                     String(config.alarm2.minute < 10 ? "0" : "") + String(config.alarm2.minute) +
+                     " (мелодия " + String(config.alarm2.melody) + ", дни: " +
+                     formatDaysMask(config.alarm2.days_mask) + ")";
+    } else {
+        alarm2Line = "Будильник 2: ВЫКЛ";
+    }
     
     // Время до ближайшего будильника
     bool anyEnabled = config.alarm1.enabled || config.alarm2.enabled;
     uint16_t minutesToAlarm = getMinutesToNextAlarm();
+    String nextAlarmLine;
     if (anyEnabled && minutesToAlarm != 0xFFFF) {
-        Serial.printf("\nДо ближайшего будильника: %u минут\n", minutesToAlarm);
+        nextAlarmLine = String("До ближайшего будильника: ") + String(minutesToAlarm) + " минут";
     } else if (!anyEnabled) {
-        Serial.print("\nНет активных будильников\n");
+        nextAlarmLine = "Нет активных будильников";
+    } else {
+        nextAlarmLine = "До ближайшего будильника: нет данных";
     }
-    
-    Serial.print("\n=========================\n");
+
+    Serial.print("\n╔═══════════════════════════════════════════════════════");
+    Serial.print("\n║                СТАТУС БУДИЛЬНИКОВ");
+    Serial.print("\n╠═══════════════════════════════════════════════════════");
+    Serial.printf("\n║ %s", alarm1Line.c_str());
+    Serial.printf("\n║ %s", alarm2Line.c_str());
+    Serial.printf("\n║ %s", nextAlarmLine.c_str());
+    Serial.print("\n╚═══════════════════════════════════════════════════════\n");
 }

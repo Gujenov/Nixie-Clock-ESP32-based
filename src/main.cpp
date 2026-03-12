@@ -5,7 +5,7 @@
 #include "menu_manager.h"  
 #include "time_utils.h"
 #include "alarm_handler.h"
-#include "dfplayer_manager.h"
+#include "audio_task.h"
 #include "ble_terminal.h"
 #include "ota_manager.h"
 #include "display/display_manager.h"
@@ -106,8 +106,7 @@ void setup() {
     // BLE включен по умолчанию (команды ble on/off остаются рабочими)
     bleTerminalEnable();
     otaInit();
-
-    // initDFPlayer(); // времено отключено для теста
+    audioTaskStart();
     
     // DEBUG: Асинхронная синхронизация - не блокирует setup()
     syncTimeAsync();
@@ -232,9 +231,9 @@ void processSecondTick() {
 
         if (printEnabled) {
             if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
-                Serial.print("\n[DS3231] Updated");
+                Serial.print("\n[DS3231] RTC time read");
             } else {
-                Serial.print("\n[RTC] Updated");
+                Serial.print("\n[RTC] RTC time read");
             }
         }
     }

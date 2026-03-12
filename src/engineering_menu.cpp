@@ -5,6 +5,7 @@
 #include "time_utils.h"
 #include "ota_manager.h"
 #include "platform_profile.h"
+#include "audio_task.h"
 
 extern bool printEnabled;
 
@@ -60,6 +61,9 @@ static bool handleEngineeringSubmenuNavigation(const String &command) {
     cmd.toLowerCase();
 
     if (cmd.equals("back") || cmd.equals("b")) {
+        if (engineeringSubMenu == ENG_SUBMENU_TESTING) {
+            audioStopPlayback();
+        }
         engineeringSubMenu = ENG_SUBMENU_NONE;
         printEngineeringMenu();
         return true;
@@ -82,15 +86,21 @@ static void printSerialNumberMenu() {
 }
 
 static void printHardwareMenu() {
-    Serial.println("\n=== НАСТРОЙКИ ЖЕЛЕЗА ===");
+    Serial.println("\n=== НАСТРОЙКИ ЖЕЛЕЗА ===\n");
+    Serial.println("ВНИМАНИЕ! Изменение параметров влияет на работоспособность устройства.");
 
-    Serial.printf("\nТекущие параметры:");
-    Serial.printf("\n%s, разрядов: %d\n", getClockTypeName(config.clock_type), config.clock_digits);
+    Serial.print("\n╔═══════════════════════════════════════════════════════");
+    Serial.print("\n║                ТЕКУЩИЕ ПАРАМЕТРЫ ЖЕЛЕЗА");
+    Serial.print("\n╠═══════════════════════════════════════════════════════");
+    Serial.printf("\n║ Тип часов: %s", getClockTypeName(config.clock_type));
+    Serial.printf("\n║ Разрядов: %d", config.clock_digits);
     if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
-        Serial.printf("Режим Nix 6: %s\n", getNix6OutputModeName(config.nix6_output_mode));
+        Serial.printf("\n║ Режим Nix 6: %s", getNix6OutputModeName(config.nix6_output_mode));
     }
-    Serial.printf("Аудио/будильник: %s\n", config.audio_module_enabled ? "Есть" : "Нет");
-    Serial.printf("Ручное управление: %s\n\n", getUiControlModeName(config.ui_control_mode));
+    Serial.printf("\n║ Аудио/будильник: %s", config.audio_module_enabled ? "Есть" : "Нет");
+    Serial.printf("\n║ IR датчик движения: %s", config.ir_sensor_enabled ? "Есть" : "Нет");
+    Serial.printf("\n║ Управление: %s", getUiControlModeName(config.ui_control_mode));
+    Serial.print("\n╚═══════════════════════════════════════════════════════\n\n");
     
     Serial.println("1  Nix <кол-во>  - Nixie clock (1,2,4,6 разрядов)");
     Serial.println("2  Nix hand      - Наручные nixie (2 разряда)");
@@ -98,15 +108,18 @@ static void printHardwareMenu() {
     Serial.println("4  Vert          - Вертикальная механика (столбиковая ролик-рейка)");
     Serial.println("5  Mech pend     - Маятниковая механика\n");
 
-    Serial.println("6  audio <1/0>   - Наличие DFPlayer и всех ф-й звука");
+    Serial.println("6  audio <1/0>   - Наличие аудиоподсистемы (I2S/SD) и всех ф-й звука");
     Serial.println("7  <1/2/3>       - button / enc / enc+button");
+    Serial.println("8  IR <1/0>      - Наличие датчика движения");
+    Serial.println("9  Light sens cal- Калибровка датчика освещения");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
 
 static void printTestingMenu() {
     Serial.println("\n=== ТЕСТИРОВАНИЕ ===");
-    Serial.println("-=В разработке=-");
+    Serial.println("1  Тест звука (I2S/MAX98357A)");
+    Serial.println("stop sound      - Остановить воспроизведение теста");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
@@ -115,9 +128,11 @@ static void printNix6OutputMenu() {
     Serial.println("\n=== NIX 6: ПОРЯДОК ВЫВОДА ===");
     Serial.println("\nВыберите порядок вывода разрядов и порядок вывода бит:\n");
     Serial.println("1  Стандартный порядок вывода: ЧАС-МИН-СЕК-СЛУЖ. Прямые биты (без инверсии)");
-    Serial.println("2  Обратный порядок вывода + инверсия битов по нибблам;");
+    Serial.println("   Драйвер: HV5555 (или аналог), 6 разрядов, побитный вывод информации");
+    Serial.println("2  Обратный порядок вывода + инверсия битов. Вывод по нибблам;");
     Serial.println("   Этот вариант стоит выбрать для первого экземпляра часов,");
-    Serial.println("   где порядок вывода: СЕК-МИН-ЧАС-СЛУЖ и все нибблы инвертированы.");
+    Serial.println("   где порядок вывода: СЕК-МИН-ЧАС-СЛУЖ и все биты в нибблах инвертированы.");
+    Serial.println("   Драйвер: 74HC595 + 6 К155ИД1");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
@@ -251,7 +266,7 @@ static bool handleHardwareMenu(const String &command) {
     if (cmd.equals("7 1") || cmd.equals("button")) {
         config.ui_control_mode = UI_CONTROL_BUTTON_ONLY;
         saveConfig();
-        Serial.println("\n[HW] Ручное управление: КНОПКА");
+        Serial.println("\n[HW] Управление: КНОПКА");
         Serial.print("> ");
         return true;
     }
@@ -259,7 +274,7 @@ static bool handleHardwareMenu(const String &command) {
     if (cmd.equals("7 2") || cmd.equals("enc")) {
         config.ui_control_mode = UI_CONTROL_ENCODER_ONLY;
         saveConfig();
-        Serial.println("\n[HW] Ручное управление: ЭНКОДЕР");
+        Serial.println("\n[HW] Управление: ЭНКОДЕР");
         Serial.print("> ");
         return true;
     }
@@ -267,7 +282,29 @@ static bool handleHardwareMenu(const String &command) {
     if (cmd.equals("7 3") || cmd.equals("enc+button")) {
         config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
         saveConfig();
-        Serial.println("\n[HW] Ручное управление: ЭНКОДЕР + КНОПКА");
+        Serial.println("\n[HW] Управление: ЭНКОДЕР + КНОПКА");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("8 1") || cmd.equals("ir 1")) {
+        config.ir_sensor_enabled = true;
+        saveConfig();
+        Serial.println("\n[HW] IR датчик движения: ВКЛЮЧЕНО");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("8 0") || cmd.equals("ir 0")) {
+        config.ir_sensor_enabled = false;
+        saveConfig();
+        Serial.println("\n[HW] IR датчик движения: ОТКЛЮЧЕНО");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("9") || cmd.equals("light sens cal")) {
+        Serial.println("\n[HW] Калибровка датчика освещения: -=В разработке=-");
         Serial.print("> ");
         return true;
     }
@@ -289,7 +326,35 @@ static bool handleTestingMenu(const String &command) {
         return true;
     }
 
-    Serial.println("-=В разработке=-");
+    if (cmd.equals("1") || cmd.equals("sound") || cmd.equals("sound test")) {
+        if (!platformGetCapabilities().sound_enabled) {
+            Serial.println("\n[TEST] Аудиоподсистема отключена в инженерном меню");
+            Serial.print("> ");
+            return true;
+        }
+
+        if (!audioTaskIsRunning()) {
+            audioTaskStart();
+        }
+
+        if (audioPlayTestFallback()) {
+            Serial.println("\n[TEST] Запущен тест звука");
+            Serial.println("[TEST] Источник будет определён автоматически: ESP32_onboard_ring.wav -> tone 880Hz");
+        } else {
+            Serial.println("\n[TEST] Ошибка: не удалось отправить команду audioTask");
+        }
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("stop") || cmd.equals("stop sound") || cmd.equals("sound stop")) {
+        audioStopPlayback();
+        Serial.println("\n[TEST] Команда остановки звука отправлена");
+        Serial.print("> ");
+        return true;
+    }
+
+    Serial.println("Неизвестная команда. Введите 'help' для списка");
     Serial.print("> ");
     return true;
 }
@@ -338,7 +403,6 @@ void enterEngineeringMenu() {
 
 void printEngineeringMenu() {
     Serial.println("\n\n=== ИНЖЕНЕРНОЕ МЕНЮ ===");
-    Serial.println("Внимание! Изменение параметров может повлиять на работу устройства.");
     Serial.println();
     Serial.println("1  Смена серийного номера");
     Serial.println("2  Настройки железа");

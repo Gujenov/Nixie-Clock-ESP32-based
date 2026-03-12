@@ -76,6 +76,7 @@ void initConfiguration() {
     // Новые платформенные поля отсутствовали в старой версии структуры
     if (stored_size < sizeof(config)) {
       config.audio_module_enabled = true;
+      config.ir_sensor_enabled = false;
       config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
     }
 
@@ -250,6 +251,7 @@ void setDefaultConfig() {
     }
 
     config.audio_module_enabled = true;
+    config.ir_sensor_enabled = false;
     config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
     
     // Будильники
