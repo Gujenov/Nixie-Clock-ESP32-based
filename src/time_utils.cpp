@@ -30,7 +30,7 @@ void checkTimeSource() {
         firstCheck = false;
         Wire.begin(I2C_SDA, I2C_SCL);
         Wire.setClock(100000);
-        Serial.print("\n\n[SYSTEM] Инициализация I2C завершена");
+        Serial.print("\n[SYSTEM] Инициализация I2C завершена\n");
     }
     
     // Не дёргаем I2C слишком часто, если DS3231 отсутствует
@@ -87,7 +87,7 @@ void checkTimeSource() {
             ds3231_available = true;
             currentTimeSource = EXTERNAL_DS3231;
 
-            Serial.print("\n\n✓ DS3231 инициализирован");
+            Serial.print("\n[DS3231] Инициализирован");
             
             // Получаем время от DS3231
             time_t currentTime = getCurrentUTCTime();
@@ -249,7 +249,7 @@ static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled)
     // Показываем информацию о режиме работы с часовыми поясами
     if (config.time_config.automatic_localtime) {
         Serial.print("\n[TZ] Автоматическое определение локального времени включено");
-        Serial.printf("\n[TZ] Задана локация: %s (режим: ezTime online)", config.time_config.timezone_name);
+        Serial.printf("\n[TZ] Текущая географическая зона: %s", config.time_config.timezone_name);
         
         // Обновляем/инициализируем ezTime после подключения WiFi
         if (setTimezone(config.time_config.timezone_name)) {
@@ -272,7 +272,7 @@ static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled)
             eztime_dst = config.time_config.current_dst_active;
         }
         
-        Serial.printf("\n[TZ] Получены данные от ezTime: UTC%+d, DST: %s", 
+        Serial.printf("\n[TZ] - [ONLINE] Сравнение с интернет (ezTime): UTC%+d, DST: %s", 
                      eztime_offset,
                      eztime_dst ? "ON" : "OFF");
         
@@ -288,12 +288,12 @@ static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled)
             bool rules_match = (year > 0) ? compareDSTRulesWithEzTime(preset, year, 2, false) : true;
 
             if (current_match && rules_match) {
-                Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - правила актуальны");
+                Serial.print("\n[TZ] ✅ СОВПАДЕНИЕ - локальные правила актуальны");
                 if (clearPosixOverrideIfZone(config.time_config.timezone_name)) {
                     saveConfig();
                 }
             } else {
-                Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление часовой зоны в прошивке");
+                Serial.print("\n[TZ] ⚠️  РАСХОЖДЕНИЕ! Требуется обновление локальных правил");
                 if (!current_match) {
                     Serial.printf("\n[TZ]    ezTime: UTC%+d, DST: %s", eztime_offset, eztime_dst ? "ON" : "OFF");
                     Serial.printf("\n[TZ]    Таблица: UTC%+d, DST: %s", local_offset, local_dst ? "ON" : "OFF");
@@ -408,7 +408,7 @@ static void wifiSyncTask(void* param) {
     Serial.print("\n[WiFi] WiFi.mode(STA)...");
     WiFi.mode(WIFI_STA);
     delay(200);
-    Serial.print(" OK");
+    Serial.print("\n[WiFi] WiFi.STA: OK");
 
     // --- Шаг 2: Подключение к сети 1 ---
     Serial.print("\n[WiFi] Подключение к сети 1");
@@ -543,7 +543,6 @@ void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
     syncLastResult = false;
 
     digitalWrite(LED_PIN, HIGH);
-    Serial.print("\n\n[SYNC] Попытка синхронизации...");
 
     syncInProgress = true;
 
@@ -561,11 +560,11 @@ void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
     );
 
     if (result != pdPASS) {
-        Serial.print("\n[SYNC] ОШИБКА: не удалось создать задачу!");
+        Serial.print("\n[SYNC] ОШИБКА: не удалось создать задачу синхронизации времени");
         syncInProgress = false;
         digitalWrite(LED_PIN, LOW);
     } else {
-        Serial.print("\n[SYNC] RTOS-задача создана");
+        Serial.print("\n\n[SYNC] Синхронизация запущена в фоне (FreeRTOS Task)");
     }
 }
 

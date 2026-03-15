@@ -595,7 +595,7 @@ bool setTimezone(const char* tz_name) {
     // Проверяем, есть ли этот пояс в таблице
     const TimezonePreset* preset = findPresetByLocation(tz_name);
     if (!preset) {
-        Serial.printf("\n[TZ] Ошибка: локация '%s' не найдена в таблице", tz_name);
+        Serial.printf("\n[TZ] Ошибка: географическая зона '%s' не найдена в таблице", tz_name);
         return false;
     }
     
@@ -603,7 +603,7 @@ bool setTimezone(const char* tz_name) {
     strncpy(config.time_config.timezone_name, tz_name, sizeof(config.time_config.timezone_name));
     config.time_config.timezone_name[sizeof(config.time_config.timezone_name)-1] = '\0';
     
-    Serial.printf("\n[TZ] Пресет локации найден в таблице: %s", preset->display_name);
+    Serial.printf("\n[TZ] Данные о времени найдены в таблице: %s", preset->display_name);
 
     // Любая неручная зона включает автоматический режим и автосинхронизацию
     if (strcmp(tz_name, "MANUAL") != 0) {
@@ -640,10 +640,10 @@ void printTimezoneInfo() {
     Serial.print("\n║                  ТЕКУЩИЕ НАСТРОЙКИ");
     Serial.print("\n╠═══════════════════════════════════════════════════════");
     
-    // Текущая локация
+    // Текущая географическая зона
     const TimezonePreset* preset = findPresetByLocation(config.time_config.timezone_name);
     if (preset) {
-        Serial.printf("\n║ Time zone: %s", preset->zone_name);
+        Serial.printf("\n║ Географическая зона: %s", preset->zone_name);
         Serial.printf("\n║ Базовое смещение: UTC%+d", preset->std_offset);
         
         // Информация о DST
@@ -662,7 +662,7 @@ void printTimezoneInfo() {
     } else {
         // Проверяем, это ручная настройка или действительно ошибка
         if (strcmp(config.time_config.timezone_name, "MANUAL") == 0) {
-            Serial.print("\n║ Time zone: Ручная настройка");
+            Serial.print("\n║ Географическая зона: Ручная настройка");
             Serial.printf("\n║ Текущее смещение: UTC%+d", config.time_config.current_offset);
             if (config.time_config.current_dst_active) {
                 Serial.print("\n║ DST: Активен (летнее время)");
@@ -670,8 +670,8 @@ void printTimezoneInfo() {
                 Serial.print("\n║ DST: Неактивен (стандартное время)");
             }
         } else {
-            Serial.printf("\n║ Time zone: %s", config.time_config.timezone_name);
-            Serial.print("\n║ ОШИБКА: Локация не найдена в таблице");
+            Serial.printf("\n║ Географическая зона: %s", config.time_config.timezone_name);
+            Serial.print("\n║ ОШИБКА: Географическая зона не найдена в таблице");
         }
     }
 

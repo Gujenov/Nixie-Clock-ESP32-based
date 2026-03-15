@@ -918,6 +918,13 @@ void printInfoMenu() {
                  static_cast<unsigned long>(m),
                  static_cast<unsigned long>(y));
     };
+    auto formatHm = [](uint64_t totalSeconds, char* out, size_t outSize) {
+        const uint64_t hours = totalSeconds / 3600ULL;
+        const uint64_t minutes = (totalSeconds % 3600ULL) / 60ULL;
+        snprintf(out, outSize, "%llu:%02llu",
+                 static_cast<unsigned long long>(hours),
+                 static_cast<unsigned long long>(minutes));
+    };
 
     
     Serial.println("\n=== Системная информация ===\n");
@@ -925,13 +932,17 @@ void printInfoMenu() {
     Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
 
     char lastServiceDate[24];
+    char totalHm[32];
+    char serviceHm[32];
     formatYmd(runtimeCounterGetLastServiceDate(), lastServiceDate, sizeof(lastServiceDate));
-    Serial.printf("1.1. Количество включений: %lu\n", static_cast<unsigned long>(runtimeCounterGetBootCount()));
-    Serial.printf("1.2. Моточасы: %.2f\n", runtimeCounterGetMotorHours());
-    Serial.printf("1.3. Дата последнего сервиса: %s\n", lastServiceDate);
-    Serial.printf("1.4. Кол-во моточасов при посл. сервисе: %.2f\n", runtimeCounterGetLastServiceMotorHours());
+    formatHm(runtimeCounterGetTotalRunSeconds(), totalHm, sizeof(totalHm));
+    formatHm(runtimeCounterGetLastServiceRunSeconds(), serviceHm, sizeof(serviceHm));
+    Serial.printf("\nКоличество включений: %lu\n", static_cast<unsigned long>(runtimeCounterGetBootCount()));
+    Serial.printf("Моточасы: %s (ЧЧ:ММ)\n", totalHm);
+    Serial.printf("Дата последнего сервиса: %s\n", lastServiceDate);
+    Serial.printf("Кол-во моточасов при посл. сервисе: %s (ЧЧ:ММ)\n", serviceHm);
 
-    Serial.printf("Тип часов: %s\n", getClockTypeLabelForInfo());
+    Serial.printf("\nТип часов: %s\n", getClockTypeLabelForInfo());
     if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
         Serial.printf("Режим вывода Nix 6: %s\n", getNix6OutputModeLabelForInfo());
     }
@@ -956,6 +967,12 @@ void printInfoMenu() {
     Serial.printf("\nESP-ROM: %s", chipModel.c_str());
     Serial.printf("\nModule: %s", "ESP32-S3-WROOM-1");
     Serial.printf("\nCPU Частота: %d MHz\n", ESP.getCpuFreqMHz());
+    float cpuTemp = getESP32Temperature();
+    if (cpuTemp > -100.0f) {
+        Serial.printf("CPU Температура: %.1f°C\n", cpuTemp);
+    } else {
+        Serial.print("CPU Температура: недоступна\n");
+    }
 
     Serial.printf("IDF версия: %s\n", esp_get_idf_version());
     Serial.printf("Cores: %d\n", ESP.getChipCores());

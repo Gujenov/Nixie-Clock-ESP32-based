@@ -17,6 +17,15 @@ enum class AudioSfxId : uint8_t {
 	OperationError
 };
 
+enum class AudioStartStatus : uint8_t {
+	Queued = 0,
+	ErrorQueueUnavailable,
+	ErrorFlashFsUnavailable,
+	ErrorFlashFileNotFound,
+	ErrorSdCardUnavailable,
+	ErrorSdAudioNotFound
+};
+
 void audioTaskStart();
 bool audioTaskIsRunning();
 void audioTaskStop();
@@ -24,7 +33,10 @@ void audioTaskStop();
 bool audioPlayTestFallback();
 bool audioPlayTestTone(uint16_t frequencyHz = 880, uint16_t durationMs = 1200);
 bool audioPlaySfx(AudioSfxId id);
+AudioStartStatus audioPlayFromFlashTest();
+AudioStartStatus audioPlayFromSdTest();
 void audioStopPlayback();
 bool audioIsPlaying();
 AudioTestSource audioGetLastTestSource();
 const char* audioTestSourceName(AudioTestSource source);
+const char* audioStartStatusName(AudioStartStatus status);

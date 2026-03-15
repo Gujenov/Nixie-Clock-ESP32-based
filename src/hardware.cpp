@@ -1,6 +1,8 @@
 #include "hardware.h"
 #include "config.h"
 
+#include <math.h>
+
 // Инициализация объектов
 ESP32Encoder encoder;
 RTC_DS3231 *rtc = nullptr;
@@ -101,5 +103,22 @@ void printDS3231Temperature() {
         Serial.printf("\n[DS3231] Температура: %.1f°C", temp);
     } else {
         Serial.print("\n[ERR] Ошибка чтения температуры DS3231");
+    }
+}
+
+float getESP32Temperature() {
+    const float t = temperatureRead();
+    if (isnan(t) || isinf(t)) {
+        return -999.0f;
+    }
+    return t;
+}
+
+void printESP32Temperature() {
+    float t = getESP32Temperature();
+    if (t > -100.0f) {
+        Serial.printf("\n[ESP32] Температура: %.1f°C", t);
+    } else {
+        Serial.print("\n[ESP32] Температура: недоступна");
     }
 }

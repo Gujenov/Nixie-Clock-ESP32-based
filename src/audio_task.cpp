@@ -7,8 +7,11 @@
 #include <driver/i2s.h>
 #include <SPIFFS.h>
 #include <FS.h>
+#include <SD.h>
+#include <SPI.h>
 
 #include <cstring>
+#include <cctype>
 
 namespace {
 
@@ -19,7 +22,8 @@ constexpr uint8_t AUDIO_TASK_CORE = 1;
 constexpr UBaseType_t AUDIO_TASK_PRIO = 1;
 
 enum class AudioCommandType : uint8_t {
-    PlayTestFallback,
+    PlayFlashFile,
+    PlaySdFile,
     PlayTestTone,
     PlaySfx,
     Stop
@@ -30,6 +34,7 @@ struct AudioCommand {
     uint16_t freqHz;
     uint16_t durationMs;
     uint8_t sfxId;
+    char path[96];
 };
 
 struct ToneState {
@@ -39,31 +44,22 @@ struct ToneState {
     uint32_t phase = 0;
 };
 
-struct PcmPlaybackState {
+struct WavStreamState {
     bool active = false;
-    int16_t* samples = nullptr;
-    size_t framesTotal = 0;
-    size_t framePos = 0;
+    File file;
+    size_t dataBytesRemaining = 0;
     uint32_t sampleRate = AUDIO_SAMPLE_RATE;
     uint8_t channels = 1; // 1 = mono, 2 = stereo
     AudioTestSource source = AudioTestSource::None;
 };
 
-struct LoadedPcmBuffer {
-    int16_t* samples = nullptr;
-    size_t frames = 0;
-    uint32_t sampleRate = AUDIO_SAMPLE_RATE;
-    uint8_t channels = 1;
-};
-
-static constexpr char FLASH_RING_WAV[] = "/ESP32_onboard_ring.wav";
+static constexpr char FLASH_ALARM_WAV[] = "/alarm_default.wav";
 static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
 static constexpr char SFX_BLE_OFF[] = "/sfx_ble_off.wav";
 static constexpr char SFX_BLE_CONNECTED[] = "/sfx_ble_connected.wav";
 static constexpr char SFX_BLE_DISCONNECTED[] = "/sfx_ble_disconnected.wav";
 static constexpr char SFX_OK[] = "/sfx_ok.wav";
 static constexpr char SFX_ERROR[] = "/sfx_error.wav";
-static constexpr size_t MAX_TEST_AUDIO_BYTES = 512 * 1024;
 
 static TaskHandle_t g_audioTaskHandle = nullptr;
 static volatile bool g_audioTaskRunning = false;
@@ -71,19 +67,19 @@ static volatile bool g_audioPlaybackActive = false;
 static QueueHandle_t g_audioQueue = nullptr;
 static bool g_i2sReady = false;
 static bool g_flashFsReady = false;
+static bool g_sdReady = false;
 static AudioTestSource g_lastTestSource = AudioTestSource::None;
+static SPIClass g_sdSpi(FSPI);
 
-static void resetPcmState(PcmPlaybackState& pcm) {
-    if (pcm.samples != nullptr) {
-        free(pcm.samples);
-        pcm.samples = nullptr;
+static void resetWavStreamState(WavStreamState& wav) {
+    if (wav.file) {
+        wav.file.close();
     }
-    pcm.active = false;
-    pcm.framesTotal = 0;
-    pcm.framePos = 0;
-    pcm.sampleRate = AUDIO_SAMPLE_RATE;
-    pcm.channels = 1;
-    pcm.source = AudioTestSource::None;
+    wav.active = false;
+    wav.dataBytesRemaining = 0;
+    wav.sampleRate = AUDIO_SAMPLE_RATE;
+    wav.channels = 1;
+    wav.source = AudioTestSource::None;
 }
 
 static bool ensureFlashFsMounted() {
@@ -92,11 +88,29 @@ static bool ensureFlashFsMounted() {
     }
 
     if (!SPIFFS.begin(false)) {
-        Serial.print("\n[AUDIO] SPIFFS mount failed");
-        return false;
+        Serial.print("\n[AUDIO] SPIFFS mount failed, пробую форматировать раздел...");
+        if (!SPIFFS.begin(true)) {
+            Serial.print("\n[AUDIO] SPIFFS format+mount failed (проверьте таблицу разделов и загрузку FS-образа)");
+            return false;
+        }
+        Serial.print("\n[AUDIO] SPIFFS был повреждён/пустой и отформатирован");
     }
 
     g_flashFsReady = true;
+    return true;
+}
+
+static bool ensureSdMounted() {
+    if (g_sdReady) {
+        return true;
+    }
+
+    g_sdSpi.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
+    if (!SD.begin(SD_SPI_CS_PIN, g_sdSpi)) {
+        return false;
+    }
+
+    g_sdReady = true;
     return true;
 }
 
@@ -139,7 +153,7 @@ static bool initI2S() {
     }
 
     g_i2sReady = true;
-    Serial.printf("\n[AUDIO] I2S ready: BCLK=%d WS=%d DOUT=%d", AUDIO_I2S_BCLK_PIN, AUDIO_I2S_LRCLK_PIN, AUDIO_I2S_DOUT_PIN);
+    Serial.printf("\n[AUDIO] I2S шина готова");
     return true;
 }
 
@@ -173,24 +187,28 @@ static void stopI2S() {
     g_i2sReady = false;
 }
 
-static bool loadWavFromFile(const char* path, LoadedPcmBuffer& outBuffer) {
-    if (!ensureFlashFsMounted()) {
+static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& outStream) {
+    if (!path || path[0] == '\0') {
         return false;
     }
 
-    File f = SPIFFS.open(path, FILE_READ);
+    File f = fs.open(path, FILE_READ);
     if (!f) {
+        Serial.printf("\n[AUDIO] WAV open failed: %s", path);
         return false;
     }
 
-    if (f.size() < 44 || static_cast<size_t>(f.size()) > MAX_TEST_AUDIO_BYTES) {
+    const size_t fileSize = static_cast<size_t>(f.size());
+    if (fileSize < 44) {
         f.close();
+        Serial.printf("\n[AUDIO] WAV too small: %s (%lu bytes)", path, static_cast<unsigned long>(fileSize));
         return false;
     }
 
     uint8_t header[44] = {0};
     if (f.read(header, sizeof(header)) != sizeof(header)) {
         f.close();
+        Serial.printf("\n[AUDIO] WAV header read failed: %s", path);
         return false;
     }
 
@@ -200,7 +218,7 @@ static bool loadWavFromFile(const char* path, LoadedPcmBuffer& outBuffer) {
     const bool dataOk = std::memcmp(header + 36, "data", 4) == 0;
     if (!riffOk || !waveOk || !fmtOk || !dataOk) {
         f.close();
-        Serial.print("\n[AUDIO] WAV header unsupported");
+        Serial.printf("\n[AUDIO] WAV header unsupported: %s", path);
         return false;
     }
 
@@ -222,54 +240,104 @@ static bool loadWavFromFile(const char* path, LoadedPcmBuffer& outBuffer) {
 
     if (audioFormat != 1 || (channels != 1 && channels != 2) || bits != 16 || dataSize == 0 || (dataSize % 2) != 0) {
         f.close();
-        Serial.print("\n[AUDIO] WAV format must be PCM16 mono/stereo");
+        Serial.printf("\n[AUDIO] WAV format must be PCM16 mono/stereo: %s", path);
         return false;
     }
 
-    if (dataSize > MAX_TEST_AUDIO_BYTES) {
+    if ((44U + dataSize) > fileSize) {
         f.close();
-        Serial.print("\n[AUDIO] WAV too large");
+        Serial.printf("\n[AUDIO] WAV data chunk inconsistent: %s (data=%lu, file=%lu)",
+                      path,
+                      static_cast<unsigned long>(dataSize),
+                      static_cast<unsigned long>(fileSize));
         return false;
     }
 
-    int16_t* data = static_cast<int16_t*>(malloc(dataSize));
-    if (!data) {
-        f.close();
-        Serial.print("\n[AUDIO] WAV alloc failed");
-        return false;
-    }
-
-    const size_t readBytes = f.read(reinterpret_cast<uint8_t*>(data), dataSize);
-    f.close();
-
-    if (readBytes != dataSize) {
-        free(data);
-        Serial.print("\n[AUDIO] WAV read failed");
-        return false;
-    }
-
-    outBuffer.samples = data;
-    outBuffer.channels = static_cast<uint8_t>(channels);
-    outBuffer.sampleRate = sampleRate;
-    outBuffer.frames = dataSize / (sizeof(int16_t) * channels);
+    outStream.file = f;
+    outStream.channels = static_cast<uint8_t>(channels);
+    outStream.sampleRate = sampleRate;
+    outStream.dataBytesRemaining = dataSize;
+    outStream.active = (dataSize > 0);
     return true;
 }
 
-static bool selectFallbackSource(LoadedPcmBuffer& outBuffer, AudioTestSource& sourceOut) {
-    if (loadWavFromFile(FLASH_RING_WAV, outBuffer)) {
-        sourceOut = AudioTestSource::FlashWav;
-        return true;
+static bool pathHasWavExtension(const char* name) {
+    if (!name) return false;
+    const char* dot = strrchr(name, '.');
+    if (!dot) return false;
+    return (tolower(static_cast<unsigned char>(dot[1])) == 'w' &&
+            tolower(static_cast<unsigned char>(dot[2])) == 'a' &&
+            tolower(static_cast<unsigned char>(dot[3])) == 'v' &&
+            dot[4] == '\0');
+}
+
+static bool findSdTestWav(char* outPath, size_t outPathSize) {
+    if (!ensureSdMounted()) {
+        return false;
     }
 
-    sourceOut = AudioTestSource::Tone;
+    File root = SD.open("/");
+    if (!root || !root.isDirectory()) {
+        return false;
+    }
+
+    File f = root.openNextFile();
+    while (f) {
+        if (!f.isDirectory() && pathHasWavExtension(f.name())) {
+            strlcpy(outPath, f.name(), outPathSize);
+            f.close();
+            root.close();
+            return true;
+        }
+        f.close();
+        f = root.openNextFile();
+    }
+
+    root.close();
     return false;
+}
+
+static const char* selectFlashTestFile() {
+    if (SPIFFS.exists(FLASH_ALARM_WAV)) {
+        return FLASH_ALARM_WAV;
+    }
+    return nullptr;
+}
+
+static void probeAudioSourcesOnStartup() {
+    const bool sdMounted = ensureSdMounted();
+    Serial.print(sdMounted ? "\n[AUDIO] microSD найдена" : "\n[AUDIO] microSD не найдена");
+
+    if (sdMounted) {
+        return;
+    }
+
+    const bool flashReady = ensureFlashFsMounted();
+    const char* selectedFlashFile = flashReady ? selectFlashTestFile() : nullptr;
+    if (selectedFlashFile != nullptr) {
+        Serial.printf("\n[AUDIO] Внутренний WAV найден: %s", selectedFlashFile);
+    } else {
+        Serial.print("\n[AUDIO] Внутренний WAV-файл не найден, доступен тональный сигнал");
+    }
 }
 
 static const char* sourceName(AudioTestSource source) {
     switch (source) {
-        case AudioTestSource::FlashWav: return "Flash FS: /ESP32_onboard_ring.wav";
+        case AudioTestSource::FlashWav: return "Flash FS: internal WAV";
         case AudioTestSource::Tone: return "Generated tone";
         default: return "none";
+    }
+}
+
+static const char* startStatusNameInternal(AudioStartStatus status) {
+    switch (status) {
+        case AudioStartStatus::Queued: return "queued";
+        case AudioStartStatus::ErrorQueueUnavailable: return "queue unavailable";
+        case AudioStartStatus::ErrorFlashFsUnavailable: return "Flash FS unavailable";
+        case AudioStartStatus::ErrorFlashFileNotFound: return "Flash file not found";
+        case AudioStartStatus::ErrorSdCardUnavailable: return "microSD unavailable";
+        case AudioStartStatus::ErrorSdAudioNotFound: return "microSD audio not found";
+        default: return "unknown";
     }
 }
 
@@ -297,8 +365,8 @@ static void sfxToneFallback(AudioSfxId id, uint16_t& freq, uint16_t& duration) {
     }
 }
 
-static void applyCommand(const AudioCommand& cmd, ToneState& tone, PcmPlaybackState& pcm) {
-    if ((cmd.type == AudioCommandType::PlayTestFallback || cmd.type == AudioCommandType::PlayTestTone || cmd.type == AudioCommandType::PlaySfx) && !g_i2sReady) {
+static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamState& wav) {
+    if ((cmd.type == AudioCommandType::PlayFlashFile || cmd.type == AudioCommandType::PlaySdFile || cmd.type == AudioCommandType::PlayTestTone || cmd.type == AudioCommandType::PlaySfx) && !g_i2sReady) {
         if (!initI2S()) {
             Serial.print("\n[AUDIO] I2S not ready, play command ignored");
             return;
@@ -306,42 +374,46 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, PcmPlaybackSt
     }
 
     switch (cmd.type) {
-        case AudioCommandType::PlayTestFallback: {
+        case AudioCommandType::PlayFlashFile: {
             tone.active = false;
-            resetPcmState(pcm);
+            resetWavStreamState(wav);
 
-            LoadedPcmBuffer buffer;
-            AudioTestSource src = AudioTestSource::None;
-            if (selectFallbackSource(buffer, src)) {
-                if (setI2SRate(buffer.sampleRate)) {
-                    pcm.samples = buffer.samples;
-                    pcm.framesTotal = buffer.frames;
-                    pcm.framePos = 0;
-                    pcm.sampleRate = buffer.sampleRate;
-                    pcm.channels = buffer.channels;
-                    pcm.source = src;
-                    pcm.active = (pcm.framesTotal > 0 && pcm.samples != nullptr);
-                    g_lastTestSource = src;
-                    g_audioPlaybackActive = pcm.active;
-                    Serial.printf("\n[AUDIO][TEST] source: %s", sourceName(src));
+            if (ensureFlashFsMounted() && openWavStreamFromFs(SPIFFS, cmd.path, wav)) {
+                if (setI2SRate(wav.sampleRate)) {
+                    wav.source = AudioTestSource::FlashWav;
+                    g_lastTestSource = AudioTestSource::FlashWav;
+                    g_audioPlaybackActive = wav.active;
+                    Serial.printf("\n[AUDIO][TEST] source: Flash FS: %s", cmd.path);
                 } else {
-                    if (buffer.samples != nullptr) {
-                        free(buffer.samples);
-                        buffer.samples = nullptr;
-                    }
+                    resetWavStreamState(wav);
                     Serial.print("\n[AUDIO] Unable to set I2S sample rate for fallback source");
                 }
             } else {
-                // Fallback: если WAV из Flash FS недоступен, играем синтетический тон.
-                g_lastTestSource = AudioTestSource::Tone;
-                Serial.printf("\n[AUDIO][TEST] source: %s", sourceName(AudioTestSource::Tone));
-                const AudioCommand toneCmd = { AudioCommandType::PlayTestTone, 880, 1200 };
-                applyCommand(toneCmd, tone, pcm);
+                Serial.printf("\n[AUDIO] Ошибка: не удалось прочитать файл из Flash FS: %s (подробности выше)", cmd.path);
+            }
+            break;
+        }
+        case AudioCommandType::PlaySdFile: {
+            tone.active = false;
+            resetWavStreamState(wav);
+
+            if (ensureSdMounted() && openWavStreamFromFs(SD, cmd.path, wav)) {
+                if (setI2SRate(wav.sampleRate)) {
+                    wav.source = AudioTestSource::FlashWav;
+                    g_lastTestSource = AudioTestSource::FlashWav;
+                    g_audioPlaybackActive = wav.active;
+                    Serial.printf("\n[AUDIO][TEST] source: microSD: %s", cmd.path);
+                } else {
+                    resetWavStreamState(wav);
+                    Serial.print("\n[AUDIO] Ошибка: не удалось выставить I2S частоту для microSD файла");
+                }
+            } else {
+                Serial.printf("\n[AUDIO] Ошибка: не удалось прочитать WAV с microSD: %s (подробности выше)", cmd.path);
             }
             break;
         }
         case AudioCommandType::PlayTestTone: {
-            resetPcmState(pcm);
+            resetWavStreamState(wav);
             const uint16_t freq = (cmd.freqHz == 0) ? 880 : cmd.freqHz;
             const uint16_t duration = (cmd.durationMs == 0) ? 1000 : cmd.durationMs;
 
@@ -358,30 +430,22 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, PcmPlaybackSt
         }
         case AudioCommandType::PlaySfx: {
             tone.active = false;
-            resetPcmState(pcm);
+            resetWavStreamState(wav);
 
             const AudioSfxId sfx = static_cast<AudioSfxId>(cmd.sfxId);
             const char* path = sfxPath(sfx);
-            LoadedPcmBuffer buffer;
 
-            if (path && loadWavFromFile(path, buffer) && setI2SRate(buffer.sampleRate)) {
-                pcm.samples = buffer.samples;
-                pcm.framesTotal = buffer.frames;
-                pcm.framePos = 0;
-                pcm.sampleRate = buffer.sampleRate;
-                pcm.channels = buffer.channels;
-                pcm.active = (pcm.framesTotal > 0 && pcm.samples != nullptr);
-                g_audioPlaybackActive = pcm.active;
+            if (path && ensureFlashFsMounted() && openWavStreamFromFs(SPIFFS, path, wav) && setI2SRate(wav.sampleRate)) {
+                wav.source = AudioTestSource::FlashWav;
+                g_audioPlaybackActive = wav.active;
                 Serial.printf("\n[AUDIO][SFX] source: Flash FS: %s", path);
             } else {
-                if (buffer.samples != nullptr) {
-                    free(buffer.samples);
-                }
+                resetWavStreamState(wav);
                 uint16_t f = 880;
                 uint16_t d = 120;
                 sfxToneFallback(sfx, f, d);
-                const AudioCommand toneCmd = { AudioCommandType::PlayTestTone, f, d, 0 };
-                applyCommand(toneCmd, tone, pcm);
+                const AudioCommand toneCmd = { AudioCommandType::PlayTestTone, f, d, 0, {0} };
+                applyCommand(toneCmd, tone, wav);
             }
             break;
         }
@@ -389,7 +453,7 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, PcmPlaybackSt
             tone.active = false;
             tone.remainingSamples = 0;
             tone.phase = 0;
-            resetPcmState(pcm);
+            resetWavStreamState(wav);
             g_audioPlaybackActive = false;
             if (g_i2sReady) {
                 i2s_zero_dma_buffer(AUDIO_I2S_PORT);
@@ -439,63 +503,118 @@ static void feedToneChunk(ToneState& tone) {
     }
 }
 
-static void feedPcmChunk(PcmPlaybackState& pcm) {
-    if (!pcm.active || !pcm.samples || pcm.framePos >= pcm.framesTotal || !g_i2sReady) {
+static void feedWavStreamChunk(WavStreamState& wav) {
+    if (!wav.active || !wav.file || wav.dataBytesRemaining == 0 || !g_i2sReady) {
         return;
     }
 
     static int16_t interleaved[AUDIO_CHUNK_SAMPLES * 2];
+    static int16_t monoBuffer[AUDIO_CHUNK_SAMPLES];
 
     uint16_t frames = AUDIO_CHUNK_SAMPLES;
-    const size_t remaining = pcm.framesTotal - pcm.framePos;
-    if (remaining < frames) {
-        frames = static_cast<uint16_t>(remaining);
+    const size_t frameBytes = static_cast<size_t>(wav.channels) * sizeof(int16_t);
+    const size_t remainingFrames = wav.dataBytesRemaining / frameBytes;
+    if (remainingFrames < frames) {
+        frames = static_cast<uint16_t>(remainingFrames);
     }
 
-    if (pcm.channels == 1) {
-        for (uint16_t i = 0; i < frames; ++i) {
-            const int16_t s = pcm.samples[pcm.framePos + i];
+    if (frames == 0) {
+        wav.active = false;
+        g_audioPlaybackActive = false;
+        resetWavStreamState(wav);
+        Serial.print("\n[AUDIO] Playback finished");
+        return;
+    }
+
+    size_t payloadBytes = 0;
+
+    if (wav.channels == 1) {
+        payloadBytes = static_cast<size_t>(frames) * sizeof(int16_t);
+        const size_t readBytes = wav.file.read(reinterpret_cast<uint8_t*>(monoBuffer), payloadBytes);
+        if (readBytes == 0) {
+            wav.active = false;
+            g_audioPlaybackActive = false;
+            resetWavStreamState(wav);
+            Serial.print("\n[AUDIO] WAV stream read reached EOF unexpectedly");
+            Serial.print("\n[AUDIO] Playback finished");
+            return;
+        }
+
+        const uint16_t framesRead = static_cast<uint16_t>(readBytes / sizeof(int16_t));
+        for (uint16_t i = 0; i < framesRead; ++i) {
+            const int16_t s = monoBuffer[i];
             interleaved[2 * i] = s;
             interleaved[2 * i + 1] = s;
         }
+        frames = framesRead;
+        payloadBytes = static_cast<size_t>(frames) * sizeof(int16_t);
     } else {
-        const int16_t* src = pcm.samples + (pcm.framePos * 2);
-        std::memcpy(interleaved, src, static_cast<size_t>(frames) * 2 * sizeof(int16_t));
+        payloadBytes = static_cast<size_t>(frames) * 2 * sizeof(int16_t);
+        const size_t readBytes = wav.file.read(reinterpret_cast<uint8_t*>(interleaved), payloadBytes);
+        if (readBytes == 0) {
+            wav.active = false;
+            g_audioPlaybackActive = false;
+            resetWavStreamState(wav);
+            Serial.print("\n[AUDIO] WAV stream read reached EOF unexpectedly");
+            Serial.print("\n[AUDIO] Playback finished");
+            return;
+        }
+        frames = static_cast<uint16_t>(readBytes / (2 * sizeof(int16_t)));
+        payloadBytes = static_cast<size_t>(frames) * 2 * sizeof(int16_t);
+    }
+
+    if (frames == 0) {
+        wav.active = false;
+        g_audioPlaybackActive = false;
+        resetWavStreamState(wav);
+        Serial.print("\n[AUDIO] Playback finished");
+        return;
     }
 
     size_t bytesWritten = 0;
     const size_t bytesToWrite = static_cast<size_t>(frames) * 2 * sizeof(int16_t);
     i2s_write(AUDIO_I2S_PORT, interleaved, bytesToWrite, &bytesWritten, pdMS_TO_TICKS(5));
 
-    if (bytesWritten > 0) {
-        const size_t framesWritten = bytesWritten / (2 * sizeof(int16_t));
-        pcm.framePos += framesWritten;
+    const size_t consumedFrames = bytesWritten / (2 * sizeof(int16_t));
+    const size_t consumedBytes = consumedFrames * frameBytes;
+    if (consumedBytes >= wav.dataBytesRemaining) {
+        wav.dataBytesRemaining = 0;
+    } else {
+        wav.dataBytesRemaining -= consumedBytes;
     }
 
-    if (pcm.framePos >= pcm.framesTotal) {
-        pcm.active = false;
+    if (wav.dataBytesRemaining == 0 || !wav.file.available()) {
+        wav.active = false;
         g_audioPlaybackActive = false;
         Serial.print("\n[AUDIO] Playback finished");
-        resetPcmState(pcm);
+        resetWavStreamState(wav);
     }
 }
 
 static void audioTaskEntry(void* /*param*/) {
     g_audioTaskRunning = true;
-    Serial.print("\n[AUDIO] audioTask started (priority: LOW)");
+
+    const bool i2sReadyNow = initI2S();
+    if (i2sReadyNow) {
+        Serial.print("\n[AUDIO] Инициализировано");
+    } else {
+        Serial.print("\n[AUDIO] Инициализировано (I2S недоступна, повторная инициализация в фоне)");
+    }
+
+    probeAudioSourcesOnStartup();
 
     ToneState tone;
-    PcmPlaybackState pcm;
+    WavStreamState wav;
     AudioCommand cmd;
 
     for (;;) {
         while (xQueueReceive(g_audioQueue, &cmd, 0) == pdTRUE) {
-            applyCommand(cmd, tone, pcm);
+            applyCommand(cmd, tone, wav);
         }
 
         if (!platformGetCapabilities().sound_enabled) {
             tone.active = false;
-            resetPcmState(pcm);
+            resetWavStreamState(wav);
             g_audioPlaybackActive = false;
             vTaskDelay(pdMS_TO_TICKS(150));
             continue;
@@ -504,7 +623,7 @@ static void audioTaskEntry(void* /*param*/) {
         if (otaIsBusy()) {
             // Во время OTA аудио — наименьший приоритет.
             tone.active = false;
-            resetPcmState(pcm);
+            resetWavStreamState(wav);
             g_audioPlaybackActive = false;
             if (g_i2sReady) {
                 i2s_zero_dma_buffer(AUDIO_I2S_PORT);
@@ -518,8 +637,8 @@ static void audioTaskEntry(void* /*param*/) {
             continue;
         }
 
-        if (pcm.active) {
-            feedPcmChunk(pcm);
+        if (wav.active) {
+            feedWavStreamChunk(wav);
             vTaskDelay(pdMS_TO_TICKS(1));
         } else if (tone.active) {
             feedToneChunk(tone);
@@ -534,6 +653,11 @@ static void audioTaskEntry(void* /*param*/) {
 
 void audioTaskStart() {
     if (g_audioTaskHandle != nullptr) {
+        return;
+    }
+
+    if (!platformGetCapabilities().sound_enabled) {
+        Serial.print("\n[AUDIO] Подсистема отключена, запуск audioTask пропущен");
         return;
     }
 
@@ -594,25 +718,15 @@ bool audioPlayTestTone(uint16_t frequencyHz, uint16_t durationMs) {
         AudioCommandType::PlayTestTone,
         frequencyHz,
         durationMs,
-        0
+        0,
+        {0}
     };
 
     return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
 }
 
 bool audioPlayTestFallback() {
-    if (g_audioQueue == nullptr) {
-        return false;
-    }
-
-    AudioCommand cmd = {
-        AudioCommandType::PlayTestFallback,
-        0,
-        0,
-        0
-    };
-
-    return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
+    return audioPlayFromFlashTest() == AudioStartStatus::Queued;
 }
 
 void audioStopPlayback() {
@@ -624,7 +738,8 @@ void audioStopPlayback() {
         AudioCommandType::Stop,
         0,
         0,
-        0
+        0,
+        {0}
     };
 
     (void)xQueueSend(g_audioQueue, &cmd, 0);
@@ -639,10 +754,62 @@ bool audioPlaySfx(AudioSfxId id) {
         AudioCommandType::PlaySfx,
         0,
         0,
-        static_cast<uint8_t>(id)
+        static_cast<uint8_t>(id),
+        {0}
     };
 
     return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
+}
+
+AudioStartStatus audioPlayFromFlashTest() {
+    if (g_audioQueue == nullptr) {
+        return AudioStartStatus::ErrorQueueUnavailable;
+    }
+    if (!ensureFlashFsMounted()) {
+        return AudioStartStatus::ErrorFlashFsUnavailable;
+    }
+    const char* selectedFlashFile = selectFlashTestFile();
+    if (selectedFlashFile == nullptr) {
+        return AudioStartStatus::ErrorFlashFileNotFound;
+    }
+
+    AudioCommand cmd = {
+        AudioCommandType::PlayFlashFile,
+        0,
+        0,
+        0,
+        {0}
+    };
+    strlcpy(cmd.path, selectedFlashFile, sizeof(cmd.path));
+    return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE ? AudioStartStatus::Queued : AudioStartStatus::ErrorQueueUnavailable;
+}
+
+AudioStartStatus audioPlayFromSdTest() {
+    if (g_audioQueue == nullptr) {
+        return AudioStartStatus::ErrorQueueUnavailable;
+    }
+    if (!ensureSdMounted()) {
+        return AudioStartStatus::ErrorSdCardUnavailable;
+    }
+
+    char foundPath[96] = {0};
+    if (!findSdTestWav(foundPath, sizeof(foundPath))) {
+        return AudioStartStatus::ErrorSdAudioNotFound;
+    }
+
+    AudioCommand cmd = {
+        AudioCommandType::PlaySdFile,
+        0,
+        0,
+        0,
+        {0}
+    };
+    strlcpy(cmd.path, foundPath, sizeof(cmd.path));
+    return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE ? AudioStartStatus::Queued : AudioStartStatus::ErrorQueueUnavailable;
+}
+
+const char* audioStartStatusName(AudioStartStatus status) {
+    return startStatusNameInternal(status);
 }
 
 bool audioIsPlaying() {

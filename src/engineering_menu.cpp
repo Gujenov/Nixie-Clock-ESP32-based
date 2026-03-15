@@ -64,7 +64,9 @@ static bool handleEngineeringSubmenuNavigation(const String &command) {
 
     if (cmd.equals("back") || cmd.equals("b")) {
         if (engineeringSubMenu == ENG_SUBMENU_TESTING) {
-            audioStopPlayback();
+            if (platformGetCapabilities().sound_enabled && audioTaskIsRunning() && audioIsPlaying()) {
+                audioStopPlayback();
+            }
         }
         engineeringSubMenu = ENG_SUBMENU_NONE;
         printEngineeringMenu();
@@ -119,9 +121,11 @@ static void printHardwareMenu() {
 }
 
 static void printTestingMenu() {
-    Serial.println("\n=== ТЕСТИРОВАНИЕ ===");
-    Serial.println("1  Тест звука (I2S/MAX98357A)");
-    Serial.println("stop sound      - Остановить воспроизведение теста");
+    Serial.println("\n=== ТЕСТИРОВАНИЕ ===\n");
+    Serial.println("1  Воспроизведение звука. Источник: microSD");
+    Serial.println("2  Воспроизведение звука. Источник: внутренняя память");
+    Serial.println("3  Воспроизведение тонального звука (880Hz)");
+    Serial.println("4  Остановить воспроизведение");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
@@ -170,14 +174,30 @@ static void printCountersMenu() {
                  static_cast<unsigned long>(y));
     };
 
+    auto formatHm = [](uint64_t totalSeconds, char* out, size_t outSize) {
+        const uint64_t hours = totalSeconds / 3600ULL;
+        const uint64_t minutes = (totalSeconds % 3600ULL) / 60ULL;
+        snprintf(out, outSize, "%llu:%02llu",
+                 static_cast<unsigned long long>(hours),
+                 static_cast<unsigned long long>(minutes));
+    };
+
+    char totalHm[32];
+    char serviceHm[32];
     char lastServiceDate[24];
+    formatHm(runtimeCounterGetTotalRunSeconds(), totalHm, sizeof(totalHm));
+    formatHm(runtimeCounterGetLastServiceRunSeconds(), serviceHm, sizeof(serviceHm));
     formatYmd(runtimeCounterGetLastServiceDate(), lastServiceDate, sizeof(lastServiceDate));
 
-    Serial.println("\n=== СБРОС СЧЁТЧИКОВ ===");
-    Serial.printf("\n1.1. Количество включений: %lu", static_cast<unsigned long>(runtimeCounterGetBootCount()));
-    Serial.printf("\n1.2. Моточасы: %.2f", runtimeCounterGetMotorHours());
-    Serial.printf("\n1.3. Дата последнего сервиса: %s", lastServiceDate);
-    Serial.printf("\n1.4. Кол-во моточасов при посл. сервисе: %.2f\n", runtimeCounterGetLastServiceMotorHours());
+
+    Serial.print("\n╔═══════════════════════════════════════════════════════");
+    Serial.print("\n║                 ТЕКУЩИЕ ДАННЫЕ");
+    Serial.print("\n╠═══════════════════════════════════════════════════════");
+    Serial.printf("\n║  Количество включений: %lu", static_cast<unsigned long>(runtimeCounterGetBootCount()));
+    Serial.printf("\n║  Моточасы: %s (ЧЧ:ММ)", totalHm);
+    Serial.printf("\n║  Дата последнего сервиса: %s", lastServiceDate);
+    Serial.printf("\n║  Моточасы при посл. сервисе: %s (ЧЧ:ММ)", serviceHm);
+    Serial.print("\n╚═══════════════════════════════════════════════════════\n");
 
     Serial.println("\n1  Провести сервис");
     Serial.println("2  Сбросить все счётчики");
@@ -297,6 +317,10 @@ static bool handleHardwareMenu(const String &command) {
     if (cmd.equals("6 1") || cmd.equals("audio 1")) {
         config.audio_module_enabled = true;
         saveConfig();
+        platformRefreshCapabilities();
+        if (!audioTaskIsRunning()) {
+            audioTaskStart();
+        }
         Serial.println("\n[HW] Аудио/будильник: ВКЛЮЧЕНО");
         Serial.print("> ");
         return true;
@@ -307,6 +331,10 @@ static bool handleHardwareMenu(const String &command) {
         config.alarm1.enabled = false;
         config.alarm2.enabled = false;
         saveConfig();
+        platformRefreshCapabilities();
+        if (audioTaskIsRunning()) {
+            audioTaskStop();
+        }
         Serial.println("\n[HW] Аудио/будильник: ОТКЛЮЧЕНО");
         Serial.print("> ");
         return true;
@@ -375,7 +403,39 @@ static bool handleTestingMenu(const String &command) {
         return true;
     }
 
-    if (cmd.equals("1") || cmd.equals("sound") || cmd.equals("sound test")) {
+    auto printPromptAfterAudioKick = [](uint32_t waitMs = 180) {
+        const uint32_t startedAt = millis();
+        while ((millis() - startedAt) < waitMs) {
+            if (audioIsPlaying()) {
+                break;
+            }
+            delay(5);
+        }
+        Serial.print("\n> ");
+    };
+
+    auto waitToneCompletionAndPrintPrompt = []() {
+        // 1) Коротко ждём, пока команда реально начнёт играть.
+        const uint32_t startWaitMs = 400;
+        const uint32_t t0 = millis();
+        while ((millis() - t0) < startWaitMs) {
+            if (audioIsPlaying()) {
+                break;
+            }
+            delay(5);
+        }
+
+        // 2) Для тонального теста ждём завершение, но с безопасным таймаутом.
+        const uint32_t finishWaitMs = 2500;
+        const uint32_t t1 = millis();
+        while (audioIsPlaying() && (millis() - t1) < finishWaitMs) {
+            delay(10);
+        }
+
+        Serial.print("\n> ");
+    };
+
+    if (cmd.equals("1") || cmd.equals("sound sd")) {
         if (!platformGetCapabilities().sound_enabled) {
             Serial.println("\n[TEST] Аудиоподсистема отключена в инженерном меню");
             Serial.print("> ");
@@ -386,19 +446,79 @@ static bool handleTestingMenu(const String &command) {
             audioTaskStart();
         }
 
-        if (audioPlayTestFallback()) {
-            Serial.println("\n[TEST] Запущен тест звука");
-            Serial.println("[TEST] Источник будет определён автоматически: ESP32_onboard_ring.wav -> tone 880Hz");
+        AudioStartStatus st = audioPlayFromSdTest();
+        if (st == AudioStartStatus::Queued) {
+            Serial.println("\n[TEST] Запущено воспроизведение с microSD");
+            printPromptAfterAudioKick();
+        } else if (st == AudioStartStatus::ErrorSdCardUnavailable) {
+            Serial.println("\n[AUDIO] Ошибка: microSD карта не найдена либо повреждена");
+            Serial.print("> ");
+        } else if (st == AudioStartStatus::ErrorSdAudioNotFound) {
+            Serial.println("\n[AUDIO] Ошибка: аудиофайлы на microSD карте не найдены");
+            Serial.print("> ");
         } else {
-            Serial.println("\n[TEST] Ошибка: не удалось отправить команду audioTask");
+            Serial.printf("\n[AUDIO] Ошибка запуска теста microSD: %s\n", audioStartStatusName(st));
+            Serial.print("> ");
         }
-        Serial.print("> ");
         return true;
     }
 
-    if (cmd.equals("stop") || cmd.equals("stop sound") || cmd.equals("sound stop")) {
-        audioStopPlayback();
-        Serial.println("\n[TEST] Команда остановки звука отправлена");
+    if (cmd.equals("2") || cmd.equals("sound flash")) {
+        if (!platformGetCapabilities().sound_enabled) {
+            Serial.println("\n[TEST] Аудиоподсистема отключена в инженерном меню");
+            Serial.print("> ");
+            return true;
+        }
+
+        if (!audioTaskIsRunning()) {
+            audioTaskStart();
+        }
+
+        AudioStartStatus st = audioPlayFromFlashTest();
+        if (st == AudioStartStatus::Queued) {
+            Serial.print("\n[TEST] Запущено воспроизведение из внутренней памяти");
+            printPromptAfterAudioKick();
+        } else if (st == AudioStartStatus::ErrorFlashFsUnavailable) {
+            Serial.print("\n[AUDIO] Ошибка: внутренняя память недоступна либо повреждена");
+            Serial.print("> ");
+        } else if (st == AudioStartStatus::ErrorFlashFileNotFound) {
+            Serial.print("\n[AUDIO] Ошибка: аудиофайл во внутренней памяти не найден");
+            Serial.print("> ");
+        } else {
+            Serial.printf("\n[AUDIO] Ошибка запуска теста внутренней памяти: %s\n", audioStartStatusName(st));
+            Serial.print("> ");
+        }
+        return true;
+    }
+
+    if (cmd.equals("3") || cmd.equals("sound tone")) {
+        if (!platformGetCapabilities().sound_enabled) {
+            Serial.println("\n[TEST] Аудиоподсистема отключена в инженерном меню");
+            Serial.print("> ");
+            return true;
+        }
+
+        if (!audioTaskIsRunning()) {
+            audioTaskStart();
+        }
+
+        if (audioPlayTestTone()) {
+            Serial.println("\n[TEST] Запущен тональный тест: 880Hz");
+            waitToneCompletionAndPrintPrompt();
+        } else {
+            Serial.println("\n[AUDIO] Ошибка: не удалось отправить команду тонального теста");
+            Serial.print("> ");
+        }
+        return true;
+    }
+
+    if (cmd.equals("4") || cmd.equals("stop")) {
+        if (audioTaskIsRunning() && audioIsPlaying()) {
+            audioStopPlayback();
+            Serial.println("\n[TEST] Команда остановки звука отправлена");
+        } else {
+            Serial.println("\n[TEST] Воспроизведение не активно");
+        }
         Serial.print("> ");
         return true;
     }
@@ -500,7 +620,7 @@ void printEngineeringMenu() {
     Serial.println("1  Смена серийного номера");
     Serial.println("2  Настройки железа");
     Serial.println("3  Тестирование");
-    Serial.println("4  Сброс счётчиков");
+    Serial.println("4  Сервис и моточасы");
     printMappingMenuCommands();
     Serial.print("> ");
 }

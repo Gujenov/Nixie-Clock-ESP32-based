@@ -72,3 +72,5 @@ time_t getRTCTime();
 void updateDayOfWeekInRTC();
 float getDS3231Temperature();
 void printDS3231Temperature();
+float getESP32Temperature();
+void printESP32Temperature();

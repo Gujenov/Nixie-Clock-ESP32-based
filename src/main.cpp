@@ -104,23 +104,27 @@ void setup() {
     initNTPClient();
     checkTimeSource(); 
     printDS3231Temperature();
+    printESP32Temperature();
 
     // BLE включен по умолчанию (команды ble on/off остаются рабочими)
     bleTerminalEnable();
     otaInit();
-    audioTaskStart();
+    if (platformGetCapabilities().sound_enabled) {
+        audioTaskStart();
+    } else {
+        Serial.print("\n[AUDIO] Подсистема отключена, audioTask не запущена");
+    }
     
     // DEBUG: Асинхронная синхронизация - не блокирует setup()
     syncTimeAsync();
     
-    Serial.print("\n\n=== Система готова ===");
-    Serial.println("\n\nhelp / ? - Перечень доступных команд");
-
     initInputHandler();
     setButtonCallback(onButtonEvent);
     setAlarmButtonCallback(onAlarmButtonEvent);
     setEncoderCallback(onEncoderEvent);
     
+    Serial.print("\n\n=== Система готова ===");
+    Serial.println("\n\nhelp / ? - Перечень доступных команд");
     // Инициализация меню (флаги уже инициализированы в menu_manager.cpp)
     printEnabled = true;
 }
@@ -183,9 +187,9 @@ void loop() {
             sqwFailed = false;
             processSecondTick();
         }
-        else if (!sqwFailed && (currentMillis - lastSQWCheck >= 3000)) {
+        else if (!sqwFailed && (currentMillis - lastSQWCheck >= 6000)) {
             sqwFailed = true;
-            Serial.print("\n[WARN] SQW не поступает 3 сек, переход на millis!");
+            Serial.print("\n[WARN] SQW не поступает 6 сек, переход на millis!");
             lastSecondCheck = currentMillis;
             processSecondTick();
         }
