@@ -12,6 +12,10 @@ HardwareSource currentTimeSource = INTERNAL_RTC;
 bool ds3231_available = false;
 volatile bool timeUpdatedFromSQW = false;
 static bool sqwInterruptAttached = false;
+static bool displayOutputEnabled = true;
+
+static constexpr uint8_t SR595_OE_ACTIVE_LEVEL = LOW;
+static constexpr uint8_t SR595_OE_INACTIVE_LEVEL = HIGH;
 
 void initHardware() {
 // Настройка пинов Энкодера и кнопок
@@ -20,14 +24,19 @@ void initHardware() {
     pinMode(ENC_BTN, INPUT_PULLUP);
     
     pinMode(ALARM_BTN, INPUT_PULLUP);
+    pinMode(LIGHT_SENSOR_PIN, INPUT);
+    analogSetPinAttenuation(LIGHT_SENSOR_PIN, ADC_11db);
 
     // Линии 74HC595: сразу переводим в выход и удерживаем в лог.0
     pinMode(SR595_DATA_PIN, OUTPUT);
     pinMode(SR595_CLK_PIN, OUTPUT);
     pinMode(SR595_LATCH_PIN, OUTPUT);
+    pinMode(SR595_OE_PIN, OUTPUT);
     digitalWrite(SR595_DATA_PIN, LOW);
     digitalWrite(SR595_CLK_PIN, LOW);
     digitalWrite(SR595_LATCH_PIN, LOW);
+    digitalWrite(SR595_OE_PIN, SR595_OE_ACTIVE_LEVEL);
+    displayOutputEnabled = true;
 
     // Инициализация энкодера
     encoder.attachSingleEdge(ENC_A, ENC_B);
@@ -40,6 +49,40 @@ void initHardware() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
     
+}
+
+void setDisplayOutputEnabled(bool enabled) {
+    displayOutputEnabled = enabled;
+    digitalWrite(SR595_OE_PIN, enabled ? SR595_OE_ACTIVE_LEVEL : SR595_OE_INACTIVE_LEVEL);
+}
+
+bool isDisplayOutputEnabled() {
+    return displayOutputEnabled;
+}
+
+uint16_t readLightSensorFiltered(uint8_t samples, uint8_t adcResolutionBits) {
+    if (samples == 0) samples = 1;
+    if (samples > 64) samples = 64;
+
+    if (adcResolutionBits < 9) adcResolutionBits = 9;
+    if (adcResolutionBits > 12) adcResolutionBits = 12;
+
+    analogReadResolution(adcResolutionBits);
+
+    uint32_t acc = 0;
+    for (uint8_t i = 0; i < samples; ++i) {
+        acc += static_cast<uint32_t>(analogRead(LIGHT_SENSOR_PIN));
+        delayMicroseconds(250);
+    }
+
+    uint16_t avg = static_cast<uint16_t>(acc / samples);
+
+    const uint8_t shift = static_cast<uint8_t>(adcResolutionBits - 10);
+    if (shift > 0) {
+        avg = static_cast<uint16_t>(avg >> shift);
+    }
+    if (avg > 1023) avg = 1023;
+    return avg;
 }
 
 void IRAM_ATTR onSQWInterrupt() {

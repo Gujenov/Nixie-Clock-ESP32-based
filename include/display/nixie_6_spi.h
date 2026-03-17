@@ -40,6 +40,7 @@ public:
     void setBrightness(uint8_t level) override;
     void showTime(uint8_t hours, uint8_t minutes, uint8_t seconds, bool showColon) override;
     void testPattern() override;
+    void showUniformDigits(uint8_t digit);
 
     // Навигация
     void trigger1(bool allowAlarmViews = true);  // Основная ветка: time -> date -> alarm1 -> alarm2 -> time
@@ -105,6 +106,7 @@ private:
     static uint8_t ones(uint8_t value);
 
     Nixie6Frame buildTimeFrame() const;
+    Nixie6Frame buildUniformFrame(uint8_t digit) const;
     Nixie6Frame buildDateFrame() const;
     Nixie6Frame buildAlarmFrame(uint8_t hour, uint8_t minute) const;
     Nixie6Frame buildPressureFrame() const;

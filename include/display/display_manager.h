@@ -44,6 +44,7 @@ public:
     void begin();
     void setBrightness(uint8_t level);
     void showTime(uint8_t hours, uint8_t minutes, uint8_t seconds, bool showColon);
+    void showUniformDigits(uint8_t digit);
     void testPattern();
 
     // Универсальный апдейт из processSecondTick()

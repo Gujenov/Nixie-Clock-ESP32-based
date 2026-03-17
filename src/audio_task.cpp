@@ -54,6 +54,9 @@ struct WavStreamState {
 };
 
 static constexpr char FLASH_ALARM_WAV[] = "/alarm_default.wav";
+static constexpr char FLASH_CHIMES_WAV[] = "/sfx_himes.wav";
+static constexpr char SD_CHIME_HOUR_WAV[] = "/chime_hour.wav";
+static constexpr char SD_CHIME_QUARTER_WAV[] = "/chime_quarter.wav";
 static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
 static constexpr char SFX_BLE_OFF[] = "/sfx_ble_off.wav";
 static constexpr char SFX_BLE_CONNECTED[] = "/sfx_ble_connected.wav";
@@ -288,6 +291,56 @@ static bool findSdTestWav(char* outPath, size_t outPathSize) {
             f.close();
             root.close();
             return true;
+        }
+        f.close();
+        f = root.openNextFile();
+    }
+
+    root.close();
+    return false;
+}
+
+static bool findSdAlarmWavByMelody(uint8_t melodyNumber, char* outPath, size_t outPathSize) {
+    if (!outPath || outPathSize == 0) return false;
+    if (!ensureSdMounted()) return false;
+
+    // Приоритетные имена:
+    // /alarm_<N>.wav, /alarm<N>.wav, /<N>.wav
+    char candidates[3][32] = {{0}};
+    snprintf(candidates[0], sizeof(candidates[0]), "/alarm_%u.wav", static_cast<unsigned>(melodyNumber));
+    snprintf(candidates[1], sizeof(candidates[1]), "/alarm%u.wav", static_cast<unsigned>(melodyNumber));
+    snprintf(candidates[2], sizeof(candidates[2]), "/%u.wav", static_cast<unsigned>(melodyNumber));
+
+    for (size_t i = 0; i < 3; ++i) {
+        if (SD.exists(candidates[i])) {
+            strlcpy(outPath, candidates[i], outPathSize);
+            return true;
+        }
+    }
+
+    File root = SD.open("/");
+    if (!root || !root.isDirectory()) {
+        return false;
+    }
+
+    File f = root.openNextFile();
+    while (f) {
+        if (!f.isDirectory()) {
+            const char* name = f.name();
+            if (name && pathHasWavExtension(name)) {
+                // Допускаем форматы: alarm_3.wav / alarm3.wav / 3.wav
+                int parsed = -1;
+                if (sscanf(name, "/alarm_%d.wav", &parsed) == 1 ||
+                    sscanf(name, "/alarm%d.wav", &parsed) == 1 ||
+                    sscanf(name, "/%d.wav", &parsed) == 1) {
+                    if (parsed == static_cast<int>(melodyNumber)) {
+                        strlcpy(outPath, name, outPathSize);
+                        f.close();
+                        root.close();
+                        return true;
+                    }
+                }
+            }
         }
         f.close();
         f = root.openNextFile();
@@ -806,6 +859,113 @@ AudioStartStatus audioPlayFromSdTest() {
     };
     strlcpy(cmd.path, foundPath, sizeof(cmd.path));
     return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE ? AudioStartStatus::Queued : AudioStartStatus::ErrorQueueUnavailable;
+}
+
+bool audioPlayAlarmMelody(uint8_t melodyNumber) {
+    if (g_audioQueue == nullptr) {
+        return false;
+    }
+
+    if (melodyNumber == 0) {
+        melodyNumber = 1;
+    }
+
+    char foundPath[96] = {0};
+    if (findSdAlarmWavByMelody(melodyNumber, foundPath, sizeof(foundPath))) {
+        AudioCommand cmd = {
+            AudioCommandType::PlaySdFile,
+            0,
+            0,
+            0,
+            {0}
+        };
+        strlcpy(cmd.path, foundPath, sizeof(cmd.path));
+        if (xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE) {
+            Serial.printf("\n[ALARM] Воспроизведение с microSD: %s", foundPath);
+            return true;
+        }
+    }
+
+    AudioStartStatus flashStatus = audioPlayFromFlashTest();
+    if (flashStatus == AudioStartStatus::Queued) {
+        Serial.print("\n[ALARM] microSD трек не найден, fallback: /alarm_default.wav из Flash FS");
+        return true;
+    }
+
+    if (audioPlayTestTone(880, 1200)) {
+        Serial.print("\n[ALARM] WAV не найден, fallback: тональный сигнал");
+        return true;
+    }
+
+    Serial.print("\n[ALARM] Не удалось запустить сигнал будильника");
+    return false;
+}
+
+static bool queuePlaySdFileByPath(const char* path) {
+    if (g_audioQueue == nullptr || !path || path[0] == '\0') {
+        return false;
+    }
+
+    AudioCommand cmd = {
+        AudioCommandType::PlaySdFile,
+        0,
+        0,
+        0,
+        {0}
+    };
+    strlcpy(cmd.path, path, sizeof(cmd.path));
+    return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
+}
+
+static bool queuePlayFlashFileByPath(const char* path) {
+    if (g_audioQueue == nullptr || !path || path[0] == '\0') {
+        return false;
+    }
+
+    AudioCommand cmd = {
+        AudioCommandType::PlayFlashFile,
+        0,
+        0,
+        0,
+        {0}
+    };
+    strlcpy(cmd.path, path, sizeof(cmd.path));
+    return xQueueSend(g_audioQueue, &cmd, 0) == pdTRUE;
+}
+
+static bool playChimeByPathWithFallback(const char* sdPath, const char* chimeLabel) {
+    if (g_audioQueue == nullptr) {
+        Serial.printf("\n[AUDIO][CHIME] %s: очередь недоступна", chimeLabel);
+        return false;
+    }
+
+    if (ensureSdMounted() && SD.exists(sdPath)) {
+        if (queuePlaySdFileByPath(sdPath)) {
+            Serial.printf("\n[AUDIO][CHIME] %s: microSD %s", chimeLabel, sdPath);
+            return true;
+        }
+        Serial.printf("\n[AUDIO][CHIME] %s: не удалось поставить в очередь microSD %s", chimeLabel, sdPath);
+    }
+
+    if (ensureFlashFsMounted() && SPIFFS.exists(FLASH_CHIMES_WAV)) {
+        if (queuePlayFlashFileByPath(FLASH_CHIMES_WAV)) {
+            Serial.printf("\n[AUDIO][CHIME] %s: fallback Flash %s", chimeLabel, FLASH_CHIMES_WAV);
+            return true;
+        }
+        Serial.printf("\n[AUDIO][CHIME] %s: не удалось поставить fallback %s", chimeLabel, FLASH_CHIMES_WAV);
+        return false;
+    }
+
+    Serial.printf("\n[AUDIO][CHIME] %s: файл не найден (microSD/Flash), пропуск", chimeLabel);
+    return false;
+}
+
+bool audioPlayChimeHourly() {
+    return playChimeByPathWithFallback(SD_CHIME_HOUR_WAV, "hourly");
+}
+
+bool audioPlayChimeQuarter() {
+    return playChimeByPathWithFallback(SD_CHIME_QUARTER_WAV, "quarter");
 }
 
 const char* audioStartStatusName(AudioStartStatus status) {

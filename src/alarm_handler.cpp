@@ -3,6 +3,7 @@
 #include "time_utils.h"
 #include "timezone_manager.h"
 #include "platform_profile.h"
+#include "audio_task.h"
 
 static bool alarmFeatureEnabled() {
     return platformGetCapabilities().alarm_enabled;
@@ -178,9 +179,14 @@ void checkAlarms() {
                 saveConfig();
                 Serial.println("[ALARM 1] Одноразовый будильник отключён");
             }
-            
-            // Добавьте здесь звук/световую индикацию
-            // Например: triggerAlarm(num);
+
+            const uint8_t melody = (num == 1) ? config.alarm1.melody : config.alarm2.melody;
+            if (platformGetCapabilities().sound_enabled) {
+                if (!audioTaskIsRunning()) {
+                    audioTaskStart();
+                }
+                (void)audioPlayAlarmMelody(melody);
+            }
         }
     };
     

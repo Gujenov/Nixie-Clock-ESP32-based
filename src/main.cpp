@@ -6,6 +6,7 @@
 #include "time_utils.h"
 #include "alarm_handler.h"
 #include "audio_task.h"
+#include "chime_scheduler.h"
 #include "ble_terminal.h"
 #include "ota_manager.h"
 #include "display/display_manager.h"
@@ -19,7 +20,126 @@ extern bool printEnabled;
 static DisplayManager displayManager;
 static bool displayEditMode = false;
 
+struct AntiPoisonState {
+    bool active = false;
+    uint8_t pass = 0;
+    uint8_t digit = 1;
+    uint32_t nextStepMs = 0;
+};
+
+static AntiPoisonState antiPoisonState;
+
+static bool isHourInHalfOpenRange(uint8_t hour, uint8_t startHour, uint8_t endHour) {
+    if (hour > 23 || startHour > 24 || endHour > 24) {
+        return true;
+    }
+
+    if (startHour == 0 && endHour == 24) {
+        return true;
+    }
+
+    if (startHour == endHour) {
+        return false;
+    }
+
+    if (startHour < endHour) {
+        return (hour >= startHour) && (hour < endHour);
+    }
+
+    return (hour >= startHour) || (hour < endHour);
+}
+
+static bool isDisplayActiveBySchedule(const tm& localTm) {
+    const uint8_t hour = static_cast<uint8_t>((localTm.tm_hour < 0) ? 0 : (localTm.tm_hour % 24));
+    return isHourInHalfOpenRange(hour,
+                                 config.display_active_start_hour,
+                                 config.display_active_end_hour);
+}
+
+static bool isAntiPoisonActive() {
+    return antiPoisonState.active;
+}
+
+static void startCathodesAntiPoisonProcedure() {
+    if (antiPoisonState.active) {
+        return;
+    }
+
+    antiPoisonState.active = true;
+    antiPoisonState.pass = 0;
+    antiPoisonState.digit = 1;
+    antiPoisonState.nextStepMs = 0;
+    Serial.println("Kathodes anti-poison procedure started");
+}
+
+static void serviceCathodesAntiPoisonProcedure(uint32_t nowMs) {
+    if (!antiPoisonState.active) {
+        return;
+    }
+
+    if (antiPoisonState.nextStepMs != 0 && nowMs < antiPoisonState.nextStepMs) {
+        return;
+    }
+
+    displayManager.showUniformDigits(antiPoisonState.digit);
+    antiPoisonState.nextStepMs = nowMs + 500;
+
+    antiPoisonState.digit++;
+    if (antiPoisonState.digit > 9) {
+        antiPoisonState.digit = 1;
+        antiPoisonState.pass++;
+        if (antiPoisonState.pass >= 2) {
+            antiPoisonState.active = false;
+            Serial.println("Kathodes anti-poison procedure run");
+        }
+    }
+}
+
+static bool isNixieCathodeDisplay() {
+    return (config.clock_type == CLOCK_TYPE_NIXIE || config.clock_type == CLOCK_TYPE_NIXIE_HAND);
+}
+
+void runAntiPoisonNow() {
+    if (!isNixieCathodeDisplay()) {
+        Serial.println("[ANTIPOISON] Пропущено: режим не Nixie");
+        return;
+    }
+    startCathodesAntiPoisonProcedure();
+}
+
 void processSecondTick();
+
+static void processSecondTicksByMillis(unsigned long currentMillis, unsigned long& lastSecondCheck) {
+    if (lastSecondCheck == 0) {
+        lastSecondCheck = currentMillis;
+        return;
+    }
+
+    const unsigned long elapsed = currentMillis - lastSecondCheck;
+    if (elapsed < 1000) {
+        return;
+    }
+
+    uint32_t ticksToRun = elapsed / 1000;
+    if (ticksToRun > 1) {
+        // Если пропущены секунды, берём опорное время заново из активного источника.
+        requestTimeTickResync();
+    }
+
+    const uint32_t maxCatchUpTicks = 8;
+    if (ticksToRun > maxCatchUpTicks) {
+        ticksToRun = maxCatchUpTicks;
+    }
+
+    for (uint32_t i = 0; i < ticksToRun; ++i) {
+        processSecondTick();
+    }
+
+    lastSecondCheck += ticksToRun * 1000;
+    if (currentMillis - lastSecondCheck > 5000) {
+        lastSecondCheck = currentMillis;
+    }
+}
 
 static void handleDisplayButtonAction(uint8_t buttonEvent) {
     const PlatformCapabilities& caps = platformGetCapabilities();
@@ -166,6 +286,9 @@ void loop() {
     if (caps.controls_enabled) {
         processAllInputs();
     }
+
+    serviceCathodesAntiPoisonProcedure(currentMillis);
+    chimeSchedulerService();
  
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
     // Работает всегда, чтобы индикация на дисплее оставалась актуальной и в меню.
@@ -184,28 +307,26 @@ void loop() {
             timeUpdatedFromSQW = false;
             portEXIT_CRITICAL(&timerMux);
             lastSQWCheck = currentMillis;
+            lastSecondCheck = currentMillis;
             sqwFailed = false;
             processSecondTick();
         }
         else if (!sqwFailed && (currentMillis - lastSQWCheck >= 6000)) {
             sqwFailed = true;
             Serial.print("\n[WARN] SQW не поступает 6 сек, переход на millis!");
+            requestTimeTickResync();
             lastSecondCheck = currentMillis;
             processSecondTick();
         }
-        else if (sqwFailed && (currentMillis - lastSecondCheck >= 1000)) {
-            lastSecondCheck = currentMillis;
-            processSecondTick();
+        else if (sqwFailed) {
+            processSecondTicksByMillis(currentMillis, lastSecondCheck);
         }
     }
     else {
         sqwMonitorArmed = false;
         sqwFailed = false;
-        if (currentMillis - lastSecondCheck >= 1000) {
-            lastSQWCheck = currentMillis;
-            lastSecondCheck = currentMillis;
-            processSecondTick();
-        }
+        lastSQWCheck = currentMillis;
+        processSecondTicksByMillis(currentMillis, lastSecondCheck);
     }
     
     delay(10);
@@ -216,9 +337,11 @@ void processSecondTick() {
     static bool lastDsState = false;
     static time_t tickUtc = 0;
     static time_t lastFiveMinuteSyncMarkUtc = 0;
+    static int32_t lastAntiPoisonHourMarker = -1;
+    const bool timeAdjustedNow = consumeTimeAdjustedFlag();
 
     // Инициализация/реинициализация базового UTC из активного источника
-    if (!tickUtcInitialized || lastDsState != ds3231_available) {
+    if (!tickUtcInitialized || lastDsState != ds3231_available || timeAdjustedNow) {
         tickUtc = getCurrentUTCTime();
         tickUtcInitialized = true;
         lastDsState = ds3231_available;
@@ -253,9 +376,31 @@ void processSecondTick() {
     struct tm local_tm_info;
     gmtime_r(&localTime, &local_tm_info);
     uint8_t currentSecond = tm_info->tm_sec;
+    const bool displayActiveNow = isDisplayActiveBySchedule(local_tm_info);
+
+    const int32_t hourMarker = (local_tm_info.tm_yday * 24) + local_tm_info.tm_hour;
+    const bool shouldRunAntiPoison = isNixieCathodeDisplay() &&
+                                     displayActiveNow &&
+                                     local_tm_info.tm_min == 0 &&
+                                     local_tm_info.tm_sec == 1 &&
+                                     hourMarker != lastAntiPoisonHourMarker;
+
+    if (shouldRunAntiPoison) {
+        startCathodesAntiPoisonProcedure();
+        lastAntiPoisonHourMarker = hourMarker;
+    }
+
+    chimeSchedulerOnTick(local_tm_info);
+
+    const bool displayShouldBeEnabled = displayActiveNow || isAntiPoisonActive();
+    if (isDisplayOutputEnabled() != displayShouldBeEnabled) {
+        setDisplayOutputEnabled(displayShouldBeEnabled);
+    }
 
     // Универсальное обновление дисплея по политике типа часов
-    if (displayManager.shouldUpdateOnSecond(currentSecond)) {
+    if (isAntiPoisonActive()) {
+        // Пока идет антиотравление, не перетираем цифры штатным обновлением.
+    } else if (displayActiveNow && displayManager.shouldUpdateOnSecond(currentSecond)) {
         displayManager.updateFromLocalTime(local_tm_info, millis(),
                                            config.alarm1.hour, config.alarm1.minute,
                                            config.alarm2.hour, config.alarm2.minute);

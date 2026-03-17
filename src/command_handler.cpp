@@ -16,6 +16,8 @@ extern WiFiUDP ntpUDP;
 extern NTPClient *timeClient;
 extern HardwareSource currentTimeSource;
 extern bool ds3231_available;
+extern void processSecondTick();
+extern void runAntiPoisonNow();
 
 void handleCommand(String command) {
     command.trim();
@@ -69,6 +71,10 @@ void handleCommand(String command) {
         }
         return;
     }
+    if (command.equalsIgnoreCase("antipoison") || command.equalsIgnoreCase("a")) {
+        runAntiPoisonNow();
+        return;
+    }
 
     // Дублируем команду в BLE, если он включен
     if (bleTerminalIsEnabled() && command.length() > 0) {
@@ -114,20 +120,28 @@ void handleCommand(String command) {
     // Команды установки UTC времени и даты
     else if (command.startsWith("set UTC T ") || command.startsWith("SUT ")) {
         String timeStr = command.startsWith("set UTC T ") ? command.substring(10) : command.substring(4);
-        setManualTime(timeStr);
+        if (setManualTime(timeStr)) {
+            processSecondTick();
+        }
     }
     else if (command.startsWith("set UTC D ") || command.startsWith("SUD ")) {
         String dateStr = command.startsWith("set UTC D ") ? command.substring(10) : command.substring(4);
-        setManualDate(dateStr);
+        if (setManualDate(dateStr)) {
+            processSecondTick();
+        }
     }
     // Команды установки локального времени и даты
     else if (command.startsWith("set local T ") || command.startsWith("SLT ")) {
         String timeStr = command.startsWith("set local T ") ? command.substring(12) : command.substring(4);
-        setManualLocalTime(timeStr);
+        if (setManualLocalTime(timeStr)) {
+            processSecondTick();
+        }
     }
     else if (command.startsWith("set local D ") || command.startsWith("SLD ")) {
         String dateStr = command.startsWith("set local D ") ? command.substring(12) : command.substring(4);
-        setManualLocalDate(dateStr);
+        if (setManualLocalDate(dateStr)) {
+            processSecondTick();
+        }
     }
     // Команды автосинхронизации
     else if (command.equalsIgnoreCase("auto sync en") || command.equalsIgnoreCase("ASE")) {

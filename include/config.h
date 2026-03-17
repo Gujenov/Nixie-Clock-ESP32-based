@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260315"
+#define FIRMWARE_VERSION "1.A0.3.260317"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -31,6 +31,9 @@
 #define SD_SPI_MOSI_PIN 11
 #define SD_SPI_MISO_PIN 13
 #define SD_SPI_CS_PIN 10
+
+// Датчик освещенности (ADC)
+#define LIGHT_SENSOR_PIN 14
 
 // Настройки таймера
 #define TIMER_DIVIDER 80
@@ -137,6 +140,24 @@ struct Config {
     bool audio_module_enabled;      // Аудио / звук / будильник
     bool ir_sensor_enabled;         // Датчик движения (IR)
     UiControlMode ui_control_mode;  // Наличие и тип ручного управления
+
+    // Пользовательские настройки звука
+    uint8_t alarm_volume;           // 0..100
+    uint8_t chime_volume;           // 0..100
+    uint8_t chimes_per_hour;        // 0,1,2,4
+    uint8_t chime_active_start_hour; // 0..24
+    uint8_t chime_active_end_hour;   // 0..24
+
+    // Пользовательские настройки дисплея/освещенности
+    bool brightness_control_enabled;
+    uint16_t brightness_sensor_max;   // Калибровка верхнего порога (0..1023)
+    uint16_t brightness_sensor_min;   // Калибровка нижнего порога (0..1023)
+    uint8_t display_active_start_hour; // 0..24
+    uint8_t display_active_end_hour;   // 0..24
+
+    // Параметры фильтра датчика освещенности
+    uint8_t light_filter_samples;      // 1..64
+    uint8_t light_sensor_resolution_bits; // 9..12 (по умолчанию 10)
     
     // Будильники
     AlarmSettings alarm1;

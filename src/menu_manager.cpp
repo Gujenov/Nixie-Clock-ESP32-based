@@ -5,10 +5,7 @@
 #include "hardware.h"
 #include "alarm_handler.h"
 #include "platform_profile.h"
-#include "runtime_counter.h"
 #include <Arduino.h> 
-#include <esp_partition.h>
-#include <esp_ota_ops.h>
 
 extern bool printEnabled;
 
@@ -28,38 +25,8 @@ static bool isAlarmFeatureEnabled() {
     return platformGetCapabilities().alarm_enabled;
 }
 
-enum SoundSubmenuState : uint8_t {
-    SOUND_SUBMENU_ROOT = 0,
-    SOUND_SUBMENU_ALARMS,
-    SOUND_SUBMENU_CHIME,
-    SOUND_SUBMENU_EXTRA
-};
-
-static SoundSubmenuState soundSubmenuState = SOUND_SUBMENU_ROOT;
-
-static const char* getClockTypeLabelForInfo() {
-    switch (config.clock_type) {
-        case CLOCK_TYPE_NIXIE:
-            switch (config.clock_digits) {
-                case 1: return "Nix 1";
-                case 2: return "Nix 2";
-                case 4: return "Nix 4";
-                case 6: return "Nix 6";
-                default: return "Nix (unknown digits)";
-            }
-        case CLOCK_TYPE_NIXIE_HAND: return "Nix hand";
-        case CLOCK_TYPE_CYCLOTRON: return "Cycl";
-        case CLOCK_TYPE_VERTICAL: return "Vert";
-        case CLOCK_TYPE_MECH_2: return "Mech 2";
-        case CLOCK_TYPE_MECH_PEND: return "Mech pend";
-        default: return "Unknown";
-    }
-}
-
-static const char* getNix6OutputModeLabelForInfo() {
-    return (config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT)
-        ? "Reverse order + reverse bits in nibble"
-        : "Standard order, direct bits";
+static bool isNixClockForUserMenu() {
+    return (config.clock_type == CLOCK_TYPE_NIXIE || config.clock_type == CLOCK_TYPE_NIXIE_HAND);
 }
 
 static void onTimezoneActivated() {
@@ -84,13 +51,12 @@ void enterMenuMode() {
     Serial.println("Устройство в режиме настройки.");
     Serial.println("Вывод времени в терминал остановлен.");
     Serial.println("Для выхода введите 'o'.");
-    soundSubmenuState = SOUND_SUBMENU_ROOT;
 
     Serial.println("\nВыбор подменю 1-6:");
     Serial.println("\n1  Настройки времени и часовых поясов");
-    Serial.println("2  Управление звуком");
-    Serial.println("3  Настройки WI-FI и NTP");
-    Serial.println("4  Управление дисплеем");
+    Serial.println("2  Управление будильниками");
+    Serial.println("3  Звук и дисплей");
+    Serial.println("4  Настройки WI-FI и NTP");
     Serial.println("5  Информация о системе");
     Serial.println("6  Конфигурация");
     Serial.println();
@@ -100,8 +66,7 @@ void exitMenuMode() {
     inMenuMode = false;
     printEnabled = true;   // Возобновляем авто-вывод
     currentMenuState = MENU_MAIN;
-    Serial.println("\n=== РЕЖИМ НАСТРОЙКИ ЗАВЕРШЕН ===");
-    Serial.println("Автоматический вывод времени возобновлён\n");
+    Serial.println("\n=== ВЫХОД ИЗ МЕНЮ ===");
 }
 
 bool isInMenuMode() {
@@ -121,17 +86,16 @@ void handleMainMenu(String command) {
             return;
         }
 
-        soundSubmenuState = SOUND_SUBMENU_ROOT;
         currentMenuState = MENU_ALARMS;
         printAlarmMenu();
     }
     else if (command.equals("3")) {
-        currentMenuState = MENU_WIFI;
-        printWifiMenu();
-    }
-    else if (command.equals("4")) {
         currentMenuState = MENU_DISPLAY;
         printDisplayMenu();
+    }
+    else if (command.equals("4")) {
+        currentMenuState = MENU_WIFI;
+        printWifiMenu();
     }
     else if (command.equals("5")) {
         currentMenuState = MENU_INFO;
@@ -406,7 +370,7 @@ void handleTimeMenu(String command) {
     }
 }
 
-// ======================= МЕНЮ Будильников (уровень 2) =======================
+// ======================= МЕНЮ ЗВУКА/БУДИЛЬНИКОВ (уровень 2) =======================
 
 static uint8_t parseDaysMask(const String &input) {
     String s = input;
@@ -455,15 +419,7 @@ static bool isDaysKeyword(const String &input) {
 }
 
 void printAlarmMenu() {
-    Serial.println("\n=== УПРАВЛЕНИЕ ЗВУКОМ ===\n");
-    Serial.println("1  Управление будильниками");
-    Serial.println("2  Настройка боя");
-    Serial.println("3  Дополнительные функции аудио");
-    printMappingMenuCommands();
-}
-
-static void printAlarmControlMenu() {
-    Serial.println("\n=== ЗВУК / БУДИЛЬНИКИ ===");
+    Serial.println("\n=== УПРАВЛЕНИЕ БУДИЛЬНИКАМИ ===");
     printAlarmStatus();
 
     Serial.println("\n  set al 1 [HH:MM] / sal1 [HH:MM] - время будильника 1");
@@ -475,18 +431,7 @@ static void printAlarmControlMenu() {
     Serial.println("  al 2 days [1,2,3...7] / a2d [1,2,3...7] - срабатывание буд. 2, начиная с Пн=1 по Вс=7");
     Serial.println("  al 2 list [weekdays|weekends|all] / a2l [...] - набор дней будильника 2 (по будням, выходным, все)");
     Serial.println("  dis al 2 / da2 - отключить будильник 2");
-    printMappingMenuCommands();
-}
 
-static void printSoundChimeMenu() {
-    Serial.println("\n=== ЗВУК / НАСТРОЙКА БОЯ ===");
-    Serial.println("-=В разработке=-");
-    printMappingMenuCommands();
-}
-
-static void printSoundExtraMenu() {
-    Serial.println("\n=== ЗВУК / ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ ===");
-    Serial.println("-=В разработке=-");
     printMappingMenuCommands();
 }
 
@@ -497,56 +442,8 @@ void handleAlarmMenu(String command) {
         return;
     }
 
-    String cmd = command;
-    cmd.trim();
-    cmd.toLowerCase();
-
-    if (soundSubmenuState == SOUND_SUBMENU_ROOT) {
-        if (handleCommonMenuCommands(command, printAlarmMenu)) return;
-
-        if (cmd.equals("1")) {
-            soundSubmenuState = SOUND_SUBMENU_ALARMS;
-            printAlarmControlMenu();
-            return;
-        }
-        if (cmd.equals("2")) {
-            soundSubmenuState = SOUND_SUBMENU_CHIME;
-            printSoundChimeMenu();
-            return;
-        }
-        if (cmd.equals("3")) {
-            soundSubmenuState = SOUND_SUBMENU_EXTRA;
-            printSoundExtraMenu();
-            return;
-        }
-
-        Serial.println("Неизвестная команда. Введите 'help' для справки");
-        return;
-    }
-
-    if (cmd.equals("back") || cmd.equals("b")) {
-        soundSubmenuState = SOUND_SUBMENU_ROOT;
-        printAlarmMenu();
-        return;
-    }
-
-    if (soundSubmenuState == SOUND_SUBMENU_CHIME) {
-        if (handleCommonMenuCommands(command, printSoundChimeMenu)) return;
-        Serial.println("-=В разработке=-");
-        printSoundChimeMenu();
-        return;
-    }
-
-    if (soundSubmenuState == SOUND_SUBMENU_EXTRA) {
-        if (handleCommonMenuCommands(command, printSoundExtraMenu)) return;
-        Serial.println("-=В разработке=-");
-        printSoundExtraMenu();
-        return;
-    }
-
-    if (handleCommonMenuCommands(command, printAlarmControlMenu)) return;
-    else if (command.equalsIgnoreCase("al") || command.equalsIgnoreCase("AL") || command.equals("status")) {
-        // Показать состояние будильников
+    if (handleCommonMenuCommands(command, printAlarmMenu)) return;
+    else if (command.equalsIgnoreCase("al") || command.equals("status")) {
         printAlarmStatus();
     }
     else if (command.startsWith("sal1") || command.startsWith("sal2")) {
@@ -556,9 +453,7 @@ void handleAlarmMenu(String command) {
         if (timeStr.length() == 0) {
             Serial.println("Нужно указать время в формате HH:MM");
         } else {
-            if (setAlarm(alarmNum, timeStr)) {
-                // Сообщение уже выводится в setAlarm()
-            } else {
+            if (!setAlarm(alarmNum, timeStr)) {
                 Serial.println("Неверный формат времени.");
             }
         }
@@ -622,28 +517,24 @@ void handleAlarmMenu(String command) {
             }
         }
     }
-        else if (command.startsWith("da1") || command.startsWith("da2")) {
-            int alarmNum = command.startsWith("da1") ? 1 : 2;
-            if (disableAlarm(alarmNum)) {
-                // Сообщение уже выводится в disableAlarm()
-            } else {
+    else if (command.startsWith("da1") || command.startsWith("da2")) {
+        int alarmNum = command.startsWith("da1") ? 1 : 2;
+        if (!disableAlarm(alarmNum)) {
+            Serial.println("Не удалось отключить будильник");
+        }
+    }
+    else if (command.startsWith("dis al ")) {
+        String numStr = command.substring(7);
+        numStr.trim();
+        int alarmNum = numStr.toInt();
+        if (alarmNum < 1 || alarmNum > 2) {
+            Serial.println("Неверный номер будильника (1 или 2)");
+        } else {
+            if (!disableAlarm(alarmNum)) {
                 Serial.println("Не удалось отключить будильник");
             }
         }
-        else if (command.startsWith("dis al ")) {
-            String numStr = command.substring(7);
-            numStr.trim();
-            int alarmNum = numStr.toInt();
-            if (alarmNum < 1 || alarmNum > 2) {
-                Serial.println("Неверный номер будильника (1 или 2)");
-            } else {
-                if (disableAlarm(alarmNum)) {
-                    // Сообщение уже выводится в disableAlarm()
-                } else {
-                    Serial.println("Не удалось отключить будильник");
-                }
-            }
-        }
+    }
     else if (command.startsWith("set al ")) {
         String args = command.substring(7);
         args.trim();
@@ -660,10 +551,7 @@ void handleAlarmMenu(String command) {
                 Serial.println("Неверный номер будильника (1 или 2)");
             }
             else {
-                if (setAlarm(alarmNum, timeStr)) {
-                    // Сообщение уже выводится в setAlarm()
-                }
-                else {
+                if (!setAlarm(alarmNum, timeStr)) {
                     Serial.println("Неверный формат времени.");
                 }
             }
@@ -682,12 +570,12 @@ void handleAlarmMenu(String command) {
         else {
             action.trim();
             if (action.startsWith("sound")) {
-                String numStr = action.substring(5);
-                numStr.trim();
-                if (numStr.length() == 0) {
+                String numStr2 = action.substring(5);
+                numStr2.trim();
+                if (numStr2.length() == 0) {
                     Serial.println("Нужно указать номер мелодии");
                 } else {
-                    int melody = numStr.toInt();
+                    int melody = numStr2.toInt();
                     if (melody <= 0) {
                         Serial.println("Неверный номер мелодии (минимум 1)");
                     } else {
@@ -746,12 +634,10 @@ void handleAlarmMenu(String command) {
                 }
             }
             else if (action.equals("enable") || action.equals("on")) {
-                if (enableAlarm(alarmNum)) Serial.printf("Будильник %d включён\n", alarmNum);
-                else Serial.println("Не удалось включить будильник");
+                if (!enableAlarm(alarmNum)) Serial.println("Не удалось включить будильник");
             }
             else if (action.equals("disable") || action.equals("off")) {
-                if (disableAlarm(alarmNum)) Serial.printf("Будильник %d отключён\n", alarmNum);
-                else Serial.println("Не удалось отключить будильник");
+                if (!disableAlarm(alarmNum)) Serial.println("Не удалось отключить будильник");
             }
             else if (action.equals("status") || action.equals("")) {
                 printAlarmStatus();
@@ -765,340 +651,12 @@ void handleAlarmMenu(String command) {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
 
-    printAlarmControlMenu();
+    printAlarmMenu();
 }
 
-void printDisplayMenu() {
-    Serial.println("\n=== УПРАВЛЕНИЕ ДИСПЛЕЕМ ===");
-    Serial.println("-=В разработке=-");
-    printMappingMenuCommands();
-}
+// Реализации меню "Звук и дисплей" и "Wi‑Fi/NTP" вынесены в menu_display_wifi.cpp
 
-void handleDisplayMenu(String command) {
-    if (handleCommonMenuCommands(command, printDisplayMenu)) return;
-    Serial.println("-=В разработке=-");
-    printDisplayMenu();
-}
-
-// ======================= МЕНЮ WIFI/NTP (уровень 2) =======================
-
-void printWifiMenu() {
-    Serial.println("\n=== WI-FI И NTP ===");
-
-    Serial.println("\nТекущие параметры:");
-    Serial.printf("  WiFi SSID (сеть 1): %s\n", strlen(config.wifi_ssid) > 0 ? config.wifi_ssid : "(не установлено)");
-    Serial.printf("  WiFi SSID (сеть 2, резервная): %s\n", strlen(config.wifi_ssid_2) > 0 ? config.wifi_ssid_2 : "(не установлено)");
-    Serial.printf("  NTP сервер 1: %s\n", config.ntp_server_1);
-    Serial.printf("  NTP сервер 2: %s\n", config.ntp_server_2);
-    Serial.printf("  NTP сервер 3: %s\n", config.ntp_server_3);
-    if (config.time_config.last_ntp_sync) {
-        time_t t = (time_t)config.time_config.last_ntp_sync;
-        struct tm tm;
-        localtime_r(&t, &tm);
-        Serial.printf("  Время последней синхронизации: %02d:%02d\n", tm.tm_hour, tm.tm_min);
-    } else {
-        Serial.println("  Время последней синхронизации: (нет данных)");
-    }
-
-    Serial.println("\nКоманды:");
-    Serial.println("  wifi scan     - Сканировать доступные сети");
-    Serial.println("  wifi [SSID] [PASSWORD] - Данные основной сети WIFI (сеть 1)");
-    Serial.println("  wifi2 [SSID] [PASSWORD] - Данные резервной сети WIFI (сеть 2)");
-    Serial.println("  set ntp1 <SERVER> - Задать NTP сервер 1");
-    Serial.println("  set ntp2 <SERVER> - Задать NTP сервер 2");
-    Serial.println("  set ntp3 <SERVER> - Задать NTP сервер 3");
-
-    printMappingMenuCommands();  //Управление меню
-}
-
-
-void handleWifiMenu(String command) {
-    if (handleCommonMenuCommands(command, printWifiMenu)) return;
-    else if (command.equals("wifi scan")) {
-        Serial.println("\nСканирование доступных WiFi сетей...");
-        int n = WiFi.scanNetworks();
-        if (n == 0) {
-            Serial.println("Нет доступных сетей");
-        } else {
-            Serial.printf("Найдено %d сетей:\n", n);
-            for (int i = 0; i < n; ++i) {
-                Serial.printf("%d: %s (RSSI: %d dBm) %s\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
-                              (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "Open" : "");
-            }
-        }
-    }
-    else if (command.startsWith("wifi ")) {
-        String args = command.substring(5);
-        int spaceIdx = args.indexOf(' ');
-        if (spaceIdx == -1) {
-            Serial.println("Нужно указать SSID и пароль");
-        }
-        else {
-            String ssid = args.substring(0, spaceIdx);
-            String password = args.substring(spaceIdx + 1);
-            ssid.trim();
-            password.trim();
-            strncpy(config.wifi_ssid, ssid.c_str(), sizeof(config.wifi_ssid) - 1);
-            strncpy(config.wifi_pass, password.c_str(), sizeof(config.wifi_pass) - 1);
-            config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
-            config.wifi_pass[sizeof(config.wifi_pass) - 1] = '\0';
-            Serial.printf("Данные для подключения к WiFi (сеть 1) установлены: SSID='%s'\n", config.wifi_ssid);
-            saveConfig();
-            Serial.println("WiFi настройки сохранены во flash");
-        }
-    }
-    else if (command.startsWith("wifi2 ")) {
-        String args = command.substring(6);
-        int spaceIdx = args.indexOf(' ');
-        if (spaceIdx == -1) {
-            Serial.println("Нужно указать SSID и пароль");
-        }
-        else {
-            String ssid = args.substring(0, spaceIdx);
-            String password = args.substring(spaceIdx + 1);
-            ssid.trim();
-            password.trim();
-            strncpy(config.wifi_ssid_2, ssid.c_str(), sizeof(config.wifi_ssid_2) - 1);
-            strncpy(config.wifi_pass_2, password.c_str(), sizeof(config.wifi_pass_2) - 1);
-            config.wifi_ssid_2[sizeof(config.wifi_ssid_2) - 1] = '\0';
-            config.wifi_pass_2[sizeof(config.wifi_pass_2) - 1] = '\0';
-            Serial.printf("Данные для подключения к WiFi (сеть 2, резервная) установлены: SSID='%s'\n", config.wifi_ssid_2);
-            saveConfig();
-            Serial.println("WiFi настройки сохранены во flash");
-        }
-    }
-    else if (command.startsWith("set ntp1 ") || command.startsWith("set ntp2 ") || command.startsWith("set ntp3 ") || command.startsWith("set ntp ")) {
-        uint8_t index = 1;
-        String server;
-
-        if (command.startsWith("set ntp1 ")) {
-            index = 1;
-            server = command.substring(9);
-        } else if (command.startsWith("set ntp2 ")) {
-            index = 2;
-            server = command.substring(9);
-        } else if (command.startsWith("set ntp3 ")) {
-            index = 3;
-            server = command.substring(9);
-        } else {
-            index = 1;
-            server = command.substring(8);
-        }
-
-        server.trim();
-        updateNTPServer(index, server.c_str());
-
-        // Если WiFi ещё не настроен, уведомляем и не пытаемся синхронизировать
-        if (strlen(config.wifi_ssid) == 0) {
-            Serial.println("\nWiFi не настроен, синхронизация NTP невозможна (установите WiFi)");
-        } else {
-            Serial.print("\nПытаюсь синхронизироваться с новым NTP сервером...");
-            syncTimeAsync(true, index);
-            Serial.println("\nСинхронизация NTP запущена, результат будет в логе\n");
-        }
-    }
-    else {
-        Serial.println("Неизвестная команда. Введите 'help' для справки");
-    }
-}
-
-// ======================= МЕНЮ ИНФОРМАЦИИ (уровень 2) =======================
-
-void printInfoMenu() {
-    auto formatYmd = [](uint32_t ymd, char* out, size_t outSize) {
-        if (ymd == 0) {
-            strlcpy(out, "не задана", outSize);
-            return;
-        }
-        uint32_t y = ymd / 10000;
-        uint32_t m = (ymd / 100) % 100;
-        uint32_t d = ymd % 100;
-        snprintf(out, outSize, "%02lu.%02lu.%04lu",
-                 static_cast<unsigned long>(d),
-                 static_cast<unsigned long>(m),
-                 static_cast<unsigned long>(y));
-    };
-    auto formatHm = [](uint64_t totalSeconds, char* out, size_t outSize) {
-        const uint64_t hours = totalSeconds / 3600ULL;
-        const uint64_t minutes = (totalSeconds % 3600ULL) / 60ULL;
-        snprintf(out, outSize, "%llu:%02llu",
-                 static_cast<unsigned long long>(hours),
-                 static_cast<unsigned long long>(minutes));
-    };
-
-    
-    Serial.println("\n=== Системная информация ===\n");
-    Serial.printf("Версия ПО: %s\n", FIRMWARE_VERSION);
-    Serial.printf("Серийный номер устройства: %s\n", config.serial_number);
-
-    char lastServiceDate[24];
-    char totalHm[32];
-    char serviceHm[32];
-    formatYmd(runtimeCounterGetLastServiceDate(), lastServiceDate, sizeof(lastServiceDate));
-    formatHm(runtimeCounterGetTotalRunSeconds(), totalHm, sizeof(totalHm));
-    formatHm(runtimeCounterGetLastServiceRunSeconds(), serviceHm, sizeof(serviceHm));
-    Serial.printf("\nКоличество включений: %lu\n", static_cast<unsigned long>(runtimeCounterGetBootCount()));
-    Serial.printf("Моточасы: %s (ЧЧ:ММ)\n", totalHm);
-    Serial.printf("Дата последнего сервиса: %s\n", lastServiceDate);
-    Serial.printf("Кол-во моточасов при посл. сервисе: %s (ЧЧ:ММ)\n", serviceHm);
-
-    Serial.printf("\nТип часов: %s\n", getClockTypeLabelForInfo());
-    if (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6) {
-        Serial.printf("Режим вывода Nix 6: %s\n", getNix6OutputModeLabelForInfo());
-    }
-    Serial.printf("Аудио/будильник: %s\n", config.audio_module_enabled ? "Есть" : "Нет");
-    Serial.printf("Ручное управление: %s\n", platformUiControlModeName(config.ui_control_mode));
-//  Serial.printf("Часовой пояс: UTC%+d\n", config.time_config.timezone_offset);
-    Serial.printf("Источник времени: %s", 
-               currentTimeSource == EXTERNAL_DS3231 ? "DS3231" : "Внутренний RTC");
-        printDS3231Temperature();   // Температура DS3231
-
-    Serial.printf("\nWiFi SSID: %s\n", config.wifi_ssid);
-    Serial.printf("NTP сервер 1: %s\n", config.ntp_server_1);
-    Serial.printf("NTP сервер 2: %s\n", config.ntp_server_2);
-    Serial.printf("NTP сервер 3: %s\n", config.ntp_server_3);
-
-    
-
-    Serial.println("\n\n=== Информация о ESP32 ===");
-    
-    // Информация о чипе
-    String chipModel = ESP.getChipModel();
-    Serial.printf("\nESP-ROM: %s", chipModel.c_str());
-    Serial.printf("\nModule: %s", "ESP32-S3-WROOM-1");
-    Serial.printf("\nCPU Частота: %d MHz\n", ESP.getCpuFreqMHz());
-    float cpuTemp = getESP32Temperature();
-    if (cpuTemp > -100.0f) {
-        Serial.printf("CPU Температура: %.1f°C\n", cpuTemp);
-    } else {
-        Serial.print("CPU Температура: недоступна\n");
-    }
-
-    Serial.printf("IDF версия: %s\n", esp_get_idf_version());
-    Serial.printf("Cores: %d\n", ESP.getChipCores());
-    Serial.printf("Revision: %d\n", ESP.getChipRevision());
-    
-    // Информация о флеш и разделах (с учетом OTA)
-    uint32_t flashSize = ESP.getFlashChipSize();
-    uint32_t sketchSize = ESP.getSketchSize();
-    const esp_partition_t* runningPart = esp_ota_get_running_partition();
-    const esp_partition_t* nextOtaPart = esp_ota_get_next_update_partition(nullptr);
-
-    uint32_t appVolume = runningPart ? static_cast<uint32_t>(runningPart->size) : (sketchSize + ESP.getFreeSketchSpace());
-    uint32_t otaVolume = nextOtaPart ? static_cast<uint32_t>(nextOtaPart->size) : 0;
-    uint32_t appFree = (appVolume > sketchSize) ? (appVolume - sketchSize) : 0;
-
-    uint32_t totalAppPartitions = 0;
-    uint32_t totalDataPartitions = 0;
-    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, nullptr);
-    while (it != nullptr) {
-        const esp_partition_t* p = esp_partition_get(it);
-        if (p) totalAppPartitions += static_cast<uint32_t>(p->size);
-        it = esp_partition_next(it);
-    }
-    esp_partition_iterator_release(it);
-
-    it = esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, nullptr);
-    while (it != nullptr) {
-        const esp_partition_t* p = esp_partition_get(it);
-        if (p) totalDataPartitions += static_cast<uint32_t>(p->size);
-        it = esp_partition_next(it);
-    }
-    esp_partition_iterator_release(it);
-
-    Serial.printf("\nFlash Size: %lu MB\n", static_cast<unsigned long>(flashSize / (1024 * 1024)));
-    Serial.printf("OTA volume: %.2f MB\n", otaVolume / (1024.0 * 1024.0));
-    Serial.printf("Application volume: %.2f MB\n", appVolume / (1024.0 * 1024.0));
-    Serial.printf("Sketch size: %.2f MB\n", sketchSize / (1024.0 * 1024.0));
-    Serial.printf("App free space: %.2f MB\n", appFree / (1024.0 * 1024.0));
-
-    float appUsage = (appVolume > 0) ? ((sketchSize * 100.0f) / appVolume) : 0.0f;
-    Serial.printf("App usage: %.1f%%\n", appUsage);
-    Serial.printf("Total APP partitions: %.2f MB\n", totalAppPartitions / (1024.0 * 1024.0));
-    Serial.printf("Total DATA partitions: %.2f MB\n", totalDataPartitions / (1024.0 * 1024.0));
-    
-    printMappingMenuCommands();  //Управление меню    
-    
-}
-
-void handleInfoMenu(String command) {
-    command.trim();
-    String cmdLower = command;
-    cmdLower.toLowerCase();
-
-    if (handleCommonMenuCommands(cmdLower, printInfoMenu)) return;
-    else {
-        Serial.println("Неизвестная команда. Введите 'help' для справки");
-    }
-}
-
-// ======================= МЕНЮ КОНФИГУРАЦИИ (уровень 2) =======================
-
-void printConfigMenu() {
-    Serial.println("\n=== ТЕКУЩАЯ КОНФИГУРАЦИЯ ===");
-    auto formatDays = [](uint8_t mask) {
-        if (mask == 0) return String("нет");
-        const char* names[7] = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
-        String out;
-        for (uint8_t i = 0; i < 7; ++i) {
-            if (mask & (1 << i)) {
-                out += names[i];
-                if (out.length() > 1) out += ", ";
-                
-            }
-        }
-        return out;
-    };
-
-    Serial.println();
-    Serial.printf("  • Сеть 1: %s\n", strlen(config.wifi_ssid) ? config.wifi_ssid : "(не установлена)");
-    Serial.printf("  • Сеть 2: %s\n", strlen(config.wifi_ssid_2) ? config.wifi_ssid_2 : "(не установлена)");
-    Serial.printf("  • NTP сервер 1: %s\n", strlen(config.ntp_server_1) ? config.ntp_server_1 : "(не установлен)");
-    Serial.printf("  • NTP сервер 2: %s\n", strlen(config.ntp_server_2) ? config.ntp_server_2 : "(не установлен)");
-    Serial.printf("  • NTP сервер 3: %s\n", strlen(config.ntp_server_3) ? config.ntp_server_3 : "(не установлен)");
-    Serial.printf("  • Часовой пояс: %s\n", strlen(config.time_config.timezone_name) ? config.time_config.timezone_name : "(не установлен)");
-        Serial.printf("  • Автосинхронизация по UTC: %s\n", 
-                      config.time_config.auto_sync_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
-    if (config.time_config.automatic_localtime && config.time_config.auto_sync_enabled) {
-        Serial.print("  • Локальное время: ИНТЕРНЕТ + проверка актуальности таблицы\n");
-    } else if (config.time_config.automatic_localtime && !config.time_config.auto_sync_enabled) {
-        Serial.print("  • Локальное время: ТАБЛИЦА (т.к. автосинхронизация отключена)\n");
-    } else {
-        Serial.print("  • Локальное время: ТАБЛИЦА / НОВОЕ ПРАВИЛО DST - если есть\n");
-    }
-    Serial.printf("  • Аудио/будильник: %s\n", config.audio_module_enabled ? "Есть" : "Нет");
-    Serial.printf("  • Ручное управление: %s\n", platformUiControlModeName(config.ui_control_mode));
-    if (isAlarmFeatureEnabled()) {
-        Serial.printf("  • Будильник 1: %s %02d:%02d, мелодия %d, %s\n",
-                      config.alarm1.enabled ? "ВКЛ" : "ВЫКЛ",
-                      config.alarm1.hour,
-                      config.alarm1.minute,
-                      config.alarm1.melody,
-                      config.alarm1.once ? "once" : "daily");
-        Serial.printf("  • Будильник 2: %s %02d:%02d, мелодия %d, дни: %s\n",
-                      config.alarm2.enabled ? "ВКЛ" : "ВЫКЛ",
-                      config.alarm2.hour,
-                      config.alarm2.minute,
-                      config.alarm2.melody,
-                      formatDays(config.alarm2.days_mask).c_str());
-    }
-
-    Serial.println("\n   default  - Сбросить к настройкам по умолчанию");
-
-    printMappingMenuCommands();  //Управление меню
-}
-
-void handleConfigMenu(String command) {
-    if (handleCommonMenuCommands(command, printConfigMenu)) return;
-    else if (command.equals("default")) {
-        setDefaultConfig();
-        saveConfig();
-        printConfigMenu();
-    }
-    else {
-        Serial.println("Неизвестная команда. Введите 'help' для справки");
-    }
-}
+// Реализации меню "Информация" и "Конфигурация" вынесены в menu_info_config.cpp
 
 // ======================= БАЗОВЫЕ КОМАНДЫ (работают всегда) =======================
 
@@ -1108,6 +666,7 @@ void printQuickHelp() {
     Serial.println("  time / t     - Текущее время");
     Serial.println("  menu / m     - Главное меню");
     Serial.println("  sync         - Синхронизировать с NTP");
+    Serial.println("  antipoison / a - Антиотравление");
     Serial.println("  reset / rst  - Перезагрузить устройство");
 
     Serial.println("\n  Работа с беспроводными интерфейсами:\n");

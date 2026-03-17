@@ -13,6 +13,7 @@ static volatile bool syncInProgress = false;
 static bool syncLastResult = false;
 static bool syncForceFlag = false;
 static uint8_t syncPreferredNtpIndex = 0;
+static volatile bool timeAdjustedFlag = false;
 static bool syncAutoEnabledSnapshot = false;
 static char syncSsid1[sizeof(config.wifi_ssid)] = {0};
 static char syncPass1[sizeof(config.wifi_pass)] = {0};
@@ -218,6 +219,19 @@ void setTimeToAllSources(time_t utcTime) {
     
    // Serial.print("Текущее время: ");
    // printTimeFromTimeT(utcTime);
+    timeAdjustedFlag = true;
+}
+
+bool consumeTimeAdjustedFlag() {
+    if (!timeAdjustedFlag) {
+        return false;
+    }
+    timeAdjustedFlag = false;
+    return true;
+}
+
+void requestTimeTickResync() {
+    timeAdjustedFlag = true;
 }
 
 static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled) {
@@ -234,17 +248,8 @@ static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled)
                tm_utc->tm_year + 1900, tm_utc->tm_mon + 1, tm_utc->tm_mday,
                tm_utc->tm_hour, tm_utc->tm_min, tm_utc->tm_sec);
 
-    // Устанавливаем UTC время в систему
-    struct timeval tv = { utcTime, 0 };
-    settimeofday(&tv, NULL);
-    Serial.print("\n[NTP] -> [RTC] Время записано во внутренний RTC");
-    
-    // Записываем в DS3231 ТОЖЕ UTC
-    if (currentTimeSource == EXTERNAL_DS3231 && rtc) {
-        DateTime rtcTime(utcTime); // Конструктор принимает time_t (UTC)
-        rtc->adjust(rtcTime);
-        Serial.print("\n[NTP] -> [DS3231] Время записано в аппаратные часы");
-    }
+    // Устанавливаем UTC время во все источники и поднимаем флаг коррекции времени.
+    setTimeToAllSources(utcTime);
     
     // Показываем информацию о режиме работы с часовыми поясами
     if (config.time_config.automatic_localtime) {

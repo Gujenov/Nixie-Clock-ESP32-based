@@ -47,6 +47,12 @@ void Nixie6SpiDriver::testPattern() {
     shiftOut32(f.pack());
 }
 
+void Nixie6SpiDriver::showUniformDigits(uint8_t digit) {
+    if (digit > 9) digit = 9;
+    const Nixie6Frame f = applyOutputMode(buildUniformFrame(digit));
+    shiftOut32(f.pack());
+}
+
 void Nixie6SpiDriver::trigger1(bool allowAlarmViews) {
     if (editPlaceholder_) {
         return;
@@ -239,6 +245,16 @@ Nixie6Frame Nixie6SpiDriver::buildTimeFrame() const {
     f.nibbles[3] = ones(minute);
     f.nibbles[4] = tens(second);
     f.nibbles[5] = ones(second);
+    return f;
+}
+
+Nixie6Frame Nixie6SpiDriver::buildUniformFrame(uint8_t digit) const {
+    Nixie6Frame f;
+    f.startFlags = statusFlagsWithSeparators();
+    const uint8_t d = digit & 0x0F;  // 0..9, 0x0A=blank
+    for (uint8_t i = 0; i < 6; ++i) {
+        f.nibbles[i] = d;
+    }
     return f;
 }
 

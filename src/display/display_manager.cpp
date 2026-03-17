@@ -118,6 +118,23 @@ void DisplayManager::showTime(uint8_t hours, uint8_t minutes, uint8_t seconds, b
     }
 }
 
+void DisplayManager::showUniformDigits(uint8_t digit) {
+    if (!driver_) {
+        return;
+    }
+
+    if (digit > 9) digit = 9;
+
+    if (isNixie6_) {
+        auto* d = static_cast<Nixie6SpiDriver*>(driver_);
+        d->showUniformDigits(digit);
+        return;
+    }
+
+    const uint8_t dd = static_cast<uint8_t>(digit * 11);
+    driver_->showTime(dd, dd, dd, true);
+}
+
 void DisplayManager::testPattern() {
     if (driver_) {
         driver_->testPattern();

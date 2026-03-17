@@ -9,6 +9,49 @@ NTPClient *timeClient = nullptr;
 Preferences preferences;
 Config config;
 
+namespace {
+
+// Layout до добавления пользовательских настроек звука/дисплея.
+// Нужен для корректной миграции без сдвига alarm1/alarm2.
+struct ConfigLegacyV1 {
+  char wifi_ssid[32];
+  char wifi_pass[32];
+  char wifi_ssid_2[32];
+  char wifi_pass_2[32];
+  char ntp_server_1[NTP_SERVER_SIZE];
+  char ntp_server_2[NTP_SERVER_SIZE];
+  char ntp_server_3[NTP_SERVER_SIZE];
+  TimeConfig time_config;
+  char serial_number[12];
+  ClockType clock_type;
+  uint8_t clock_digits;
+  Nix6OutputMode nix6_output_mode;
+  bool audio_module_enabled;
+  bool ir_sensor_enabled;
+  UiControlMode ui_control_mode;
+  AlarmSettings alarm1;
+  AlarmSettings alarm2;
+};
+
+void applyNewUserSettingsDefaults() {
+  config.alarm_volume = 50;
+  config.chime_volume = 50;
+  config.chimes_per_hour = 1;
+  config.chime_active_start_hour = 0;
+  config.chime_active_end_hour = 24;
+
+  config.brightness_control_enabled = false;
+  config.brightness_sensor_max = 900;
+  config.brightness_sensor_min = 100;
+  config.display_active_start_hour = 0;
+  config.display_active_end_hour = 24;
+
+  config.light_filter_samples = 8;
+  config.light_sensor_resolution_bits = 10;
+}
+
+} // namespace
+
 void initConfiguration() {
   preferences.begin("config", false);
   
@@ -23,11 +66,46 @@ void initConfiguration() {
     // Размер изменился - нужна миграция
     Serial.printf("\n\n[SYSTEM] Размер конфигурации изменился: %d -> %d байт", stored_size, sizeof(config));
     Serial.print("\n[SYSTEM] Выполняется миграция конфигурации...");
-    
-    // Загружаем старые данные (сколько влезет)
-    size_t copy_size = (stored_size < sizeof(config)) ? stored_size : sizeof(config);
-    memset(&config, 0, sizeof(config));  // Сначала обнуляем всё
-    preferences.getBytes("data", &config, copy_size);
+
+    // Специальная миграция со старого layout, чтобы не потерять будильники.
+    if (stored_size == sizeof(ConfigLegacyV1)) {
+      ConfigLegacyV1 oldCfg = {};
+      preferences.getBytes("data", &oldCfg, sizeof(oldCfg));
+      memset(&config, 0, sizeof(config));
+
+      memcpy(config.wifi_ssid, oldCfg.wifi_ssid, sizeof(config.wifi_ssid));
+      memcpy(config.wifi_pass, oldCfg.wifi_pass, sizeof(config.wifi_pass));
+      memcpy(config.wifi_ssid_2, oldCfg.wifi_ssid_2, sizeof(config.wifi_ssid_2));
+      memcpy(config.wifi_pass_2, oldCfg.wifi_pass_2, sizeof(config.wifi_pass_2));
+      memcpy(config.ntp_server_1, oldCfg.ntp_server_1, sizeof(config.ntp_server_1));
+      memcpy(config.ntp_server_2, oldCfg.ntp_server_2, sizeof(config.ntp_server_2));
+      memcpy(config.ntp_server_3, oldCfg.ntp_server_3, sizeof(config.ntp_server_3));
+
+      config.time_config = oldCfg.time_config;
+      memcpy(config.serial_number, oldCfg.serial_number, sizeof(config.serial_number));
+
+      config.clock_type = oldCfg.clock_type;
+      config.clock_digits = oldCfg.clock_digits;
+      config.nix6_output_mode = oldCfg.nix6_output_mode;
+      config.audio_module_enabled = oldCfg.audio_module_enabled;
+      config.ir_sensor_enabled = oldCfg.ir_sensor_enabled;
+      config.ui_control_mode = oldCfg.ui_control_mode;
+
+      config.alarm1 = oldCfg.alarm1;
+      config.alarm2 = oldCfg.alarm2;
+
+      applyNewUserSettingsDefaults();
+      Serial.print("\n[SYSTEM] Применена точная миграция legacy-конфигурации (с сохранением будильников)");
+    } else {
+      // Универсальная миграция (best effort)
+      size_t copy_size = (stored_size < sizeof(config)) ? stored_size : sizeof(config);
+      memset(&config, 0, sizeof(config));
+      preferences.getBytes("data", &config, copy_size);
+
+      if (stored_size < sizeof(config)) {
+        applyNewUserSettingsDefaults();
+      }
+    }
     
     // Инициализируем новые поля значениями по умолчанию
     if (config.time_config.manual_std_offset == 0 && config.time_config.manual_dst_offset == 0) {
@@ -124,6 +202,30 @@ void initConfiguration() {
 
   if (config.ui_control_mode < UI_CONTROL_BUTTON_ONLY || config.ui_control_mode > UI_CONTROL_ENCODER_BUTTON) {
     config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
+  }
+
+  if (config.alarm_volume > 100) config.alarm_volume = 50;
+  if (config.chime_volume > 100) config.chime_volume = 50;
+  if (!(config.chimes_per_hour == 0 || config.chimes_per_hour == 1 || config.chimes_per_hour == 2 || config.chimes_per_hour == 4)) {
+    config.chimes_per_hour = 1;
+  }
+  if (config.chime_active_start_hour > 24) config.chime_active_start_hour = 0;
+  if (config.chime_active_end_hour > 24) config.chime_active_end_hour = 24;
+
+  if (config.brightness_sensor_max > 1023) config.brightness_sensor_max = 900;
+  if (config.brightness_sensor_min > 1023) config.brightness_sensor_min = 100;
+  if (config.brightness_sensor_min >= config.brightness_sensor_max) {
+    config.brightness_sensor_min = 100;
+    config.brightness_sensor_max = 900;
+  }
+  if (config.display_active_start_hour > 24) config.display_active_start_hour = 0;
+  if (config.display_active_end_hour > 24) config.display_active_end_hour = 24;
+
+  if (config.light_filter_samples == 0 || config.light_filter_samples > 64) {
+    config.light_filter_samples = 8;
+  }
+  if (config.light_sensor_resolution_bits < 9 || config.light_sensor_resolution_bits > 12) {
+    config.light_sensor_resolution_bits = 10;
   }
 
   platformRefreshCapabilities();
@@ -253,6 +355,21 @@ void setDefaultConfig() {
     config.audio_module_enabled = true;
     config.ir_sensor_enabled = false;
     config.ui_control_mode = UI_CONTROL_ENCODER_BUTTON;
+
+    config.alarm_volume = 50;
+    config.chime_volume = 50;
+    config.chimes_per_hour = 1;
+    config.chime_active_start_hour = 0;
+    config.chime_active_end_hour = 24;
+
+    config.brightness_control_enabled = false;
+    config.brightness_sensor_max = 900;
+    config.brightness_sensor_min = 100;
+    config.display_active_start_hour = 0;
+    config.display_active_end_hour = 24;
+
+    config.light_filter_samples = 8;
+    config.light_sensor_resolution_bits = 10;
     
     // Будильники
     config.alarm1 = {0, 0, false, 1, 0x7F, false};

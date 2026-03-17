@@ -20,6 +20,7 @@
 #define SR595_DATA_PIN 5   // SER / DS
 #define SR595_CLK_PIN 6    // SRCLK / SHCP
 #define SR595_LATCH_PIN 4  // RCLK / STCP
+#define SR595_OE_PIN 21    // OE (active LOW): LOW=output enabled, HIGH=blank
 
 // Алиасы под SPI-терминологию (удобно для будущего перехода)
 #define HSPI_MOSI_PIN SR595_DATA_PIN
@@ -33,8 +34,9 @@
 #define IS_MEM_GPIO(pin) ((pin) == MEM_GPIO_36 || (pin) == MEM_GPIO_37 || (pin) == MEM_GPIO_38)
 
 // Проверки конфликтов пинов на этапе компиляции
-#if (SR595_DATA_PIN == SR595_CLK_PIN) || (SR595_DATA_PIN == SR595_LATCH_PIN) || (SR595_CLK_PIN == SR595_LATCH_PIN)
-#error "SR595 pin conflict: DATA/CLK/LATCH must be different GPIOs"
+#if (SR595_DATA_PIN == SR595_CLK_PIN) || (SR595_DATA_PIN == SR595_LATCH_PIN) || (SR595_DATA_PIN == SR595_OE_PIN) || \
+	(SR595_CLK_PIN == SR595_LATCH_PIN) || (SR595_CLK_PIN == SR595_OE_PIN) || (SR595_LATCH_PIN == SR595_OE_PIN)
+#error "SR595 pin conflict: DATA/CLK/LATCH/OE must be different GPIOs"
 #endif
 
 #if (ENC_A == ENC_B) || (ENC_A == ENC_BTN) || (ENC_B == ENC_BTN)
@@ -48,7 +50,8 @@
 // Жёсткая защита от использования memory GPIO в пользовательской обвязке
 #if IS_MEM_GPIO(I2C_SDA) || IS_MEM_GPIO(I2C_SCL) || IS_MEM_GPIO(SQW_PIN) || \
 	IS_MEM_GPIO(ENC_A) || IS_MEM_GPIO(ENC_B) || IS_MEM_GPIO(ENC_BTN) || IS_MEM_GPIO(ALARM_BTN) || \
-	IS_MEM_GPIO(SR595_DATA_PIN) || IS_MEM_GPIO(SR595_CLK_PIN) || IS_MEM_GPIO(SR595_LATCH_PIN) || \
+	IS_MEM_GPIO(SR595_DATA_PIN) || IS_MEM_GPIO(SR595_CLK_PIN) || IS_MEM_GPIO(SR595_LATCH_PIN) || IS_MEM_GPIO(SR595_OE_PIN) || \
+	IS_MEM_GPIO(LIGHT_SENSOR_PIN) || \
 	IS_MEM_GPIO(LED_PIN) || \
 	IS_MEM_GPIO(AUDIO_I2S_BCLK_PIN) || IS_MEM_GPIO(AUDIO_I2S_LRCLK_PIN) || IS_MEM_GPIO(AUDIO_I2S_DOUT_PIN) || \
 	IS_MEM_GPIO(SD_SPI_SCK_PIN) || IS_MEM_GPIO(SD_SPI_MOSI_PIN) || IS_MEM_GPIO(SD_SPI_MISO_PIN) || IS_MEM_GPIO(SD_SPI_CS_PIN)
@@ -74,3 +77,10 @@ float getDS3231Temperature();
 void printDS3231Temperature();
 float getESP32Temperature();
 void printESP32Temperature();
+
+// Считывание датчика освещенности (усреднение N измерений, результат приведён к 10 битам 0..1023)
+uint16_t readLightSensorFiltered(uint8_t samples, uint8_t adcResolutionBits);
+
+// Управление OE линии 74HC595 (true = включить выходы, false = погасить индикаторы)
+void setDisplayOutputEnabled(bool enabled);
+bool isDisplayOutputEnabled();
