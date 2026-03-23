@@ -42,7 +42,7 @@ static bool isHourInHalfOpenRange(uint8_t hour, uint8_t startHour, uint8_t endHo
     return (hour >= startHour) || (hour < endHour);
 }
 
-static bool isChimeActiveBySchedule(const tm& localTm) {
+static bool isBellActiveBySchedule(const tm& localTm) {
     const uint8_t hour = static_cast<uint8_t>((localTm.tm_hour < 0) ? 0 : (localTm.tm_hour % 24));
     return isHourInHalfOpenRange(hour,
                                  config.chime_active_start_hour,
@@ -55,12 +55,12 @@ static void scheduleChime(PendingChimeType type, uint8_t repeats) {
     }
 
     if (pendingChime.repeatsRemaining != 0) {
-        Serial.println("[AUDIO][CHIME] Предыдущая серия ещё не завершена, новая заменяет старую");
+        Serial.println("[AUDIO][BELL] Предыдущая серия ещё не завершена, новая заменяет старую");
     }
 
     pendingChime.type = type;
     pendingChime.repeatsRemaining = repeats;
-    Serial.printf("[AUDIO][CHIME] Запланировано: type=%s, repeats=%u\n",
+    Serial.printf("[AUDIO][BELL] Запланировано: type=%s, repeats=%u\n",
                   type == PendingChimeType::Hourly ? "hourly" : "quarter",
                   static_cast<unsigned>(repeats));
 }
@@ -81,7 +81,7 @@ void chimeSchedulerService() {
     if (!platformGetCapabilities().sound_enabled) {
         pendingChime.type = PendingChimeType::None;
         pendingChime.repeatsRemaining = 0;
-        Serial.println("[AUDIO][CHIME] Пропуск: аудио отключено");
+        Serial.println("[AUDIO][BELL] Пропуск: аудио отключено");
         return;
     }
 
@@ -108,7 +108,7 @@ void chimeSchedulerService() {
             pendingChime.type = PendingChimeType::None;
         }
     } else {
-        Serial.println("\n[AUDIO][CHIME] Не удалось запустить воспроизведение, серия отменена");
+        Serial.println("\n[AUDIO][BELL] Не удалось запустить воспроизведение, серия отменена");
         pendingChime.type = PendingChimeType::None;
         pendingChime.repeatsRemaining = 0;
     }
@@ -128,7 +128,7 @@ void chimeSchedulerOnTick(const tm& localTm) {
 
     const uint8_t chimeMode = config.chimes_per_hour;
     const bool chimeEnabled = (chimeMode == 1 || chimeMode == 2 || chimeMode == 4);
-    const bool chimeWindowActive = isChimeActiveBySchedule(localTm);
+    const bool chimeWindowActive = isBellActiveBySchedule(localTm);
     if (!chimeEnabled || !chimeWindowActive) {
         return;
     }
@@ -154,4 +154,17 @@ void chimeSchedulerOnTick(const tm& localTm) {
             scheduleChime(PendingChimeType::Quarter, 3);
         }
     }
+}
+
+bool bellSchedulerIsEnabled() {
+    const uint8_t chimeMode = config.chimes_per_hour;
+    return (chimeMode == 1 || chimeMode == 2 || chimeMode == 4);
+}
+
+bool bellSchedulerIsWindowActive(const tm& localTm) {
+    return isBellActiveBySchedule(localTm);
+}
+
+bool bellSchedulerIsActiveNow(const tm& localTm) {
+    return bellSchedulerIsEnabled() && bellSchedulerIsWindowActive(localTm);
 }

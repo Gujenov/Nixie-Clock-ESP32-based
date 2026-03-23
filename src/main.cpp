@@ -20,6 +20,23 @@ extern bool printEnabled;
 static DisplayManager displayManager;
 static bool displayEditMode = false;
 
+static const char* resetReasonText(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_UNKNOWN:   return "UNKNOWN";
+        case ESP_RST_POWERON:   return "POWERON";
+        case ESP_RST_EXT:       return "EXTERNAL";
+        case ESP_RST_SW:        return "SOFTWARE";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "UNMAPPED";
+    }
+}
+
 struct AntiPoisonState {
     bool active = false;
     uint8_t pass = 0;
@@ -54,6 +71,36 @@ static bool isDisplayActiveBySchedule(const tm& localTm) {
     return isHourInHalfOpenRange(hour,
                                  config.display_active_start_hour,
                                  config.display_active_end_hour);
+}
+
+static void printRuntimeStateSnapshot() {
+    const time_t utcNow = getCurrentUTCTime();
+    const time_t localNow = utcToLocal(utcNow);
+    tm localTm{};
+    gmtime_r(&localNow, &localTm);
+
+    const bool displayActiveNow = isDisplayActiveBySchedule(localTm);
+    const bool bellEnabled = bellSchedulerIsEnabled();
+    const bool bellWindowActive = bellSchedulerIsWindowActive(localTm);
+
+    Serial.print("\nТекущее состояние часов:");
+    Serial.printf("\n[DISP] %s", displayActiveNow ? "дисплей активен" : "режим гашения индикаторов");
+    Serial.printf("\n[DISP] Время активности дисплея: %u-%u",
+                  static_cast<unsigned>(config.display_active_start_hour),
+                  static_cast<unsigned>(config.display_active_end_hour));
+
+    Serial.printf("\n[BELL] %s", bellEnabled ? "бой вкл" : "бой выкл");
+    if (bellEnabled) {
+        if (bellWindowActive) {
+            Serial.printf("\n[BELL] Время активности боя: %u-%u",
+                          static_cast<unsigned>(config.chime_active_start_hour),
+                          static_cast<unsigned>(config.chime_active_end_hour));
+        } else {
+            Serial.printf("\n[BELL] Активен режим тишины - бой не активен в данное время (окно %u-%u)",
+                          static_cast<unsigned>(config.chime_active_start_hour),
+                          static_cast<unsigned>(config.chime_active_end_hour));
+        }
+    }
 }
 
 static bool isAntiPoisonActive() {
@@ -216,7 +263,8 @@ static void onEncoderEvent(int32_t delta, int32_t position) {
 void setup() {
     delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
-    Serial.printf("\n[BOOT] reset reason: %d", (int)esp_reset_reason());
+    const esp_reset_reason_t rr = esp_reset_reason();
+    Serial.printf("\n[BOOT] reset reason: %s (%d)", resetReasonText(rr), static_cast<int>(rr));
     initConfiguration();
     runtimeCounterInit();
     platformRefreshCapabilities();
@@ -242,6 +290,8 @@ void setup() {
     setButtonCallback(onButtonEvent);
     setAlarmButtonCallback(onAlarmButtonEvent);
     setEncoderCallback(onEncoderEvent);
+
+        printRuntimeStateSnapshot();
     
     Serial.print("\n\n=== Система готова ===");
     Serial.println("\n\nhelp / ? - Перечень доступных команд");
@@ -338,6 +388,11 @@ void processSecondTick() {
     static time_t tickUtc = 0;
     static time_t lastFiveMinuteSyncMarkUtc = 0;
     static int32_t lastAntiPoisonHourMarker = -1;
+    static bool displayStateInitialized = false;
+    static bool prevDisplayShouldBeEnabled = true;
+    static bool bellStateInitialized = false;
+    static bool prevBellEnabled = false;
+    static bool prevBellActive = false;
     const bool timeAdjustedNow = consumeTimeAdjustedFlag();
 
     // Инициализация/реинициализация базового UTC из активного источника
@@ -393,8 +448,40 @@ void processSecondTick() {
     chimeSchedulerOnTick(local_tm_info);
 
     const bool displayShouldBeEnabled = displayActiveNow || isAntiPoisonActive();
+    if (!displayStateInitialized) {
+        prevDisplayShouldBeEnabled = displayShouldBeEnabled;
+        displayStateInitialized = true;
+    } else if (prevDisplayShouldBeEnabled != displayShouldBeEnabled) {
+        if (displayShouldBeEnabled) {
+            Serial.println("\n[DISP] Дисплей активен - выход из режима гашения");
+        } else {
+            Serial.println("\n[DISP] Активен режим гашения индикаторов");
+        }
+        prevDisplayShouldBeEnabled = displayShouldBeEnabled;
+    }
+
     if (isDisplayOutputEnabled() != displayShouldBeEnabled) {
         setDisplayOutputEnabled(displayShouldBeEnabled);
+    }
+
+    const bool bellEnabled = bellSchedulerIsEnabled();
+    const bool bellActive = bellSchedulerIsActiveNow(local_tm_info);
+    if (!bellStateInitialized) {
+        prevBellEnabled = bellEnabled;
+        prevBellActive = bellActive;
+        bellStateInitialized = true;
+    } else if (prevBellEnabled != bellEnabled || prevBellActive != bellActive) {
+        if (!bellEnabled) {
+            Serial.print("\n[BELL] Бой отключен");
+        } else if (!bellActive) {
+            Serial.print("\n[BELL] Активен режим тишины - бой временно неактивен");
+        } else if (prevBellEnabled && !prevBellActive) {
+            Serial.print("\n[BELL] Режим боя восстановлен - выход из режима тишины");
+        } else {
+            Serial.print("\n[BELL] Бой включен");
+        }
+        prevBellEnabled = bellEnabled;
+        prevBellActive = bellActive;
     }
 
     // Универсальное обновление дисплея по политике типа часов
@@ -421,7 +508,9 @@ void processSecondTick() {
                 Serial.print("\n[WARN] SQW не доступен");    
             }
             printTime();
-            if (!dispDbg.available) {
+            if (!displayShouldBeEnabled) {
+                Serial.print("\n [DISP] Погашен");
+            } else if (!dispDbg.available) {
                 Serial.printf("\n [DISP] backend not implemented for type=%u digits=%u",
                               static_cast<unsigned>(config.clock_type),
                               static_cast<unsigned>(config.clock_digits));
@@ -443,4 +532,5 @@ void processSecondTick() {
             lastSyncHour = local_tm_info.tm_hour;
         }
     }
+
 }

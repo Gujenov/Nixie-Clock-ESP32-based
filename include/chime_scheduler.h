@@ -10,3 +10,8 @@ void chimeSchedulerService();
 
 // Сброс внутреннего состояния планировщика.
 void chimeSchedulerReset();
+
+// Текущее состояние планировщика боя.
+bool bellSchedulerIsEnabled();
+bool bellSchedulerIsWindowActive(const tm& localTm);
+bool bellSchedulerIsActiveNow(const tm& localTm);

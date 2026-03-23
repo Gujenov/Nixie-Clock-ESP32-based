@@ -107,11 +107,11 @@ void printDisplayMenu() {
     if (soundEnabled) {
         Serial.println("\nНастройка громкости:");
         Serial.println("  set alarm volume / sav 0...100      - Уровень громкости будильника");
-        Serial.println("  set chime volume / scv 0...100      - Уровень громкости боя");
+        Serial.println("  set bell volume / sbv 0...100       - Уровень громкости боя");
 
         Serial.println("\nНастройка боя:");
-        Serial.println("  chimes per hour / cph 0|1|2|4       - 4=четвертной, 2=половинный, 1=часовой, 0=выкл");
-        Serial.println("  chimes time activity / cta HH-HH    - Активность боя (полуинтервал [start,end))");
+        Serial.println("  bells per hour / bph 0|1|2|4        - 4=четвертной, 2=половинный, 1=часовой, 0=выкл");
+        Serial.println("  bells time activity / bta HH-HH     - Активность боя (полуинтервал [start,end))");
     } else {
         Serial.println("\nЗвуковая подсистема отключена в инженерном меню. Команды настройки звука недоступны.");
     }
@@ -152,8 +152,14 @@ void handleDisplayMenu(String command) {
         return;
     }
 
-    if (lower.startsWith("set chime volume ") || lower.startsWith("scv ")) {
-        String arg = lower.startsWith("scv ") ? lower.substring(4) : lower.substring(17);
+    if (lower.startsWith("set bell volume ") ||
+        lower.startsWith("sbv ")) {
+        String arg;
+        if (lower.startsWith("sbv ")) {
+            arg = lower.substring(4);
+        } else {
+            arg = lower.substring(16);
+        }
         arg.trim();
         int v = arg.toInt();
         if (arg.length() == 0 || v < 0 || v > 100) {
@@ -167,8 +173,14 @@ void handleDisplayMenu(String command) {
         return;
     }
 
-    if (lower.startsWith("chimes per hour ") || lower.startsWith("cph ")) {
-        String arg = lower.startsWith("cph ") ? lower.substring(4) : lower.substring(16);
+    if (lower.startsWith("bells per hour ") ||
+        lower.startsWith("bph ")) {
+        String arg;
+        if (lower.startsWith("bph ")) {
+            arg = lower.substring(4);
+        } else {
+            arg = lower.substring(15);
+        }
         arg.trim();
         int v = arg.toInt();
         if (!(v == 0 || v == 1 || v == 2 || v == 4)) {
@@ -182,8 +194,14 @@ void handleDisplayMenu(String command) {
         return;
     }
 
-    if (lower.startsWith("chimes time activity ") || lower.startsWith("cta ")) {
-        String arg = lower.startsWith("cta ") ? lower.substring(4) : lower.substring(21);
+    if (lower.startsWith("bells time activity ") ||
+        lower.startsWith("bta ")) {
+        String arg;
+        if (lower.startsWith("bta ")) {
+            arg = lower.substring(4);
+        } else {
+            arg = lower.substring(20);
+        }
         arg.trim();
         uint8_t sh = 0, eh = 24;
         if (!parseHourRange(arg, sh, eh)) {

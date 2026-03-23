@@ -47,6 +47,14 @@
 #warning "Pin conflict: ALARM_BTN conflicts with encoder lines/buttons (set unique GPIO for stable operation)"
 #endif
 
+// Защита от пересечения линий индикации (74HC595) и SPI microSD
+#if (SR595_DATA_PIN == SD_SPI_SCK_PIN) || (SR595_DATA_PIN == SD_SPI_MOSI_PIN) || (SR595_DATA_PIN == SD_SPI_MISO_PIN) || (SR595_DATA_PIN == SD_SPI_CS_PIN) || \
+	(SR595_CLK_PIN == SD_SPI_SCK_PIN) || (SR595_CLK_PIN == SD_SPI_MOSI_PIN) || (SR595_CLK_PIN == SD_SPI_MISO_PIN) || (SR595_CLK_PIN == SD_SPI_CS_PIN) || \
+	(SR595_LATCH_PIN == SD_SPI_SCK_PIN) || (SR595_LATCH_PIN == SD_SPI_MOSI_PIN) || (SR595_LATCH_PIN == SD_SPI_MISO_PIN) || (SR595_LATCH_PIN == SD_SPI_CS_PIN) || \
+	(SR595_OE_PIN == SD_SPI_SCK_PIN) || (SR595_OE_PIN == SD_SPI_MOSI_PIN) || (SR595_OE_PIN == SD_SPI_MISO_PIN) || (SR595_OE_PIN == SD_SPI_CS_PIN)
+#error "Pin conflict: 74HC595 display lines must not overlap with microSD SPI lines"
+#endif
+
 // Жёсткая защита от использования memory GPIO в пользовательской обвязке
 #if IS_MEM_GPIO(I2C_SDA) || IS_MEM_GPIO(I2C_SCL) || IS_MEM_GPIO(SQW_PIN) || \
 	IS_MEM_GPIO(ENC_A) || IS_MEM_GPIO(ENC_B) || IS_MEM_GPIO(ENC_BTN) || IS_MEM_GPIO(ALARM_BTN) || \

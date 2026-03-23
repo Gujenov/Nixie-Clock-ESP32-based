@@ -50,6 +50,7 @@ struct WavStreamState {
     size_t dataBytesRemaining = 0;
     uint32_t sampleRate = AUDIO_SAMPLE_RATE;
     uint8_t channels = 1; // 1 = mono, 2 = stereo
+    bool isSdStream = false;
     AudioTestSource source = AudioTestSource::None;
 };
 
@@ -74,6 +75,14 @@ static bool g_sdReady = false;
 static AudioTestSource g_lastTestSource = AudioTestSource::None;
 static SPIClass g_sdSpi(FSPI);
 
+static void invalidateSdMount(const char* reason = nullptr) {
+    if (reason && reason[0] != '\0') {
+        Serial.printf("\n[AUDIO][SD] %s", reason);
+    }
+    g_sdReady = false;
+    SD.end();
+}
+
 static void resetWavStreamState(WavStreamState& wav) {
     if (wav.file) {
         wav.file.close();
@@ -82,6 +91,7 @@ static void resetWavStreamState(WavStreamState& wav) {
     wav.dataBytesRemaining = 0;
     wav.sampleRate = AUDIO_SAMPLE_RATE;
     wav.channels = 1;
+    wav.isSdStream = false;
     wav.source = AudioTestSource::None;
 }
 
@@ -105,11 +115,20 @@ static bool ensureFlashFsMounted() {
 
 static bool ensureSdMounted() {
     if (g_sdReady) {
+        if (SD.cardType() == CARD_NONE) {
+            invalidateSdMount("card removed");
+            return false;
+        }
         return true;
     }
 
     g_sdSpi.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
     if (!SD.begin(SD_SPI_CS_PIN, g_sdSpi)) {
+        return false;
+    }
+
+    if (SD.cardType() == CARD_NONE) {
+        invalidateSdMount("card detect failed after mount");
         return false;
     }
 
@@ -279,24 +298,28 @@ static bool findSdTestWav(char* outPath, size_t outPathSize) {
         return false;
     }
 
-    File root = SD.open("/");
-    if (!root || !root.isDirectory()) {
-        return false;
-    }
-
-    File f = root.openNextFile();
-    while (f) {
-        if (!f.isDirectory() && pathHasWavExtension(f.name())) {
-            strlcpy(outPath, f.name(), outPathSize);
-            f.close();
-            root.close();
-            return true;
+    static const char* kAudioDirs[] = {"/alarms", "/Alarms", "/bells", "/Bells"};
+    for (size_t d = 0; d < (sizeof(kAudioDirs) / sizeof(kAudioDirs[0])); ++d) {
+        File folder = SD.open(kAudioDirs[d]);
+        if (!folder || !folder.isDirectory()) {
+            continue;
         }
-        f.close();
-        f = root.openNextFile();
+
+        File f = folder.openNextFile();
+        while (f) {
+            if (!f.isDirectory() && pathHasWavExtension(f.name())) {
+                strlcpy(outPath, f.name(), outPathSize);
+                f.close();
+                folder.close();
+                return true;
+            }
+            f.close();
+            f = folder.openNextFile();
+        }
+
+        folder.close();
     }
 
-    root.close();
     return false;
 }
 
@@ -304,49 +327,82 @@ static bool findSdAlarmWavByMelody(uint8_t melodyNumber, char* outPath, size_t o
     if (!outPath || outPathSize == 0) return false;
     if (!ensureSdMounted()) return false;
 
-    // Приоритетные имена:
-    // /alarm_<N>.wav, /alarm<N>.wav, /<N>.wav
-    char candidates[3][32] = {{0}};
-    snprintf(candidates[0], sizeof(candidates[0]), "/alarm_%u.wav", static_cast<unsigned>(melodyNumber));
-    snprintf(candidates[1], sizeof(candidates[1]), "/alarm%u.wav", static_cast<unsigned>(melodyNumber));
-    snprintf(candidates[2], sizeof(candidates[2]), "/%u.wav", static_cast<unsigned>(melodyNumber));
+    // Приоритетные имена в каталогах /alarms и /Alarms:
+    // alarm_<N>.wav, alarm<N>.wav, <N>.wav
+    static const char* kAlarmDirs[] = {"/alarms", "/Alarms"};
+    char candidates[6][48] = {{0}};
+    size_t candidateCount = 0;
 
-    for (size_t i = 0; i < 3; ++i) {
+    for (size_t d = 0; d < (sizeof(kAlarmDirs) / sizeof(kAlarmDirs[0])); ++d) {
+        const char* dir = kAlarmDirs[d];
+        snprintf(candidates[candidateCount++], sizeof(candidates[0]), "%s/alarm_%u.wav", dir, static_cast<unsigned>(melodyNumber));
+        snprintf(candidates[candidateCount++], sizeof(candidates[0]), "%s/alarm%u.wav", dir, static_cast<unsigned>(melodyNumber));
+        snprintf(candidates[candidateCount++], sizeof(candidates[0]), "%s/%u.wav", dir, static_cast<unsigned>(melodyNumber));
+    }
+
+    for (size_t i = 0; i < candidateCount; ++i) {
         if (SD.exists(candidates[i])) {
             strlcpy(outPath, candidates[i], outPathSize);
             return true;
         }
     }
 
-    File root = SD.open("/");
-    if (!root || !root.isDirectory()) {
-        return false;
-    }
+    for (size_t d = 0; d < (sizeof(kAlarmDirs) / sizeof(kAlarmDirs[0])); ++d) {
+        const char* dir = kAlarmDirs[d];
+        File folder = SD.open(dir);
+        if (!folder || !folder.isDirectory()) {
+            continue;
+        }
 
-    File f = root.openNextFile();
-    while (f) {
-        if (!f.isDirectory()) {
-            const char* name = f.name();
-            if (name && pathHasWavExtension(name)) {
-                // Допускаем форматы: alarm_3.wav / alarm3.wav / 3.wav
-                int parsed = -1;
-                if (sscanf(name, "/alarm_%d.wav", &parsed) == 1 ||
-                    sscanf(name, "/alarm%d.wav", &parsed) == 1 ||
-                    sscanf(name, "/%d.wav", &parsed) == 1) {
-                    if (parsed == static_cast<int>(melodyNumber)) {
-                        strlcpy(outPath, name, outPathSize);
-                        f.close();
-                        root.close();
-                        return true;
+        File f = folder.openNextFile();
+        while (f) {
+            if (!f.isDirectory()) {
+                const char* name = f.name();
+                if (name && pathHasWavExtension(name)) {
+                    // Допускаем форматы: alarm_3.wav / alarm3.wav / 3.wav
+                    int parsed = -1;
+                    if (sscanf(name, "%*[^0-9]%d.wav", &parsed) == 1 ||
+                        sscanf(name, "%d.wav", &parsed) == 1) {
+                        if (parsed == static_cast<int>(melodyNumber)) {
+                            strlcpy(outPath, name, outPathSize);
+                            f.close();
+                            folder.close();
+                            return true;
+                        }
                     }
                 }
             }
+            f.close();
+            f = folder.openNextFile();
         }
-        f.close();
-        f = root.openNextFile();
+
+        folder.close();
     }
 
-    root.close();
+    return false;
+}
+
+static bool resolveSdChimePath(const char* fileName, char* outPath, size_t outPathSize) {
+    if (!fileName || fileName[0] == '\0' || !outPath || outPathSize == 0) {
+        return false;
+    }
+    if (!ensureSdMounted()) {
+        return false;
+    }
+
+    static const char* kChimeDirs[] = {"/bells", "/Bells"};
+    char candidate[64] = {0};
+
+    for (size_t i = 0; i < (sizeof(kChimeDirs) / sizeof(kChimeDirs[0])); ++i) {
+        const char* dir = kChimeDirs[i];
+        snprintf(candidate, sizeof(candidate), "%s/%s", dir, fileName);
+
+        if (SD.exists(candidate)) {
+            strlcpy(outPath, candidate, outPathSize);
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -432,6 +488,7 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamStat
             resetWavStreamState(wav);
 
             if (ensureFlashFsMounted() && openWavStreamFromFs(SPIFFS, cmd.path, wav)) {
+                wav.isSdStream = false;
                 if (setI2SRate(wav.sampleRate)) {
                     wav.source = AudioTestSource::FlashWav;
                     g_lastTestSource = AudioTestSource::FlashWav;
@@ -451,6 +508,7 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamStat
             resetWavStreamState(wav);
 
             if (ensureSdMounted() && openWavStreamFromFs(SD, cmd.path, wav)) {
+                wav.isSdStream = true;
                 if (setI2SRate(wav.sampleRate)) {
                     wav.source = AudioTestSource::FlashWav;
                     g_lastTestSource = AudioTestSource::FlashWav;
@@ -489,6 +547,7 @@ static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamStat
             const char* path = sfxPath(sfx);
 
             if (path && ensureFlashFsMounted() && openWavStreamFromFs(SPIFFS, path, wav) && setI2SRate(wav.sampleRate)) {
+                wav.isSdStream = false;
                 wav.source = AudioTestSource::FlashWav;
                 g_audioPlaybackActive = wav.active;
                 Serial.printf("\n[AUDIO][SFX] source: Flash FS: %s", path);
@@ -585,6 +644,9 @@ static void feedWavStreamChunk(WavStreamState& wav) {
         payloadBytes = static_cast<size_t>(frames) * sizeof(int16_t);
         const size_t readBytes = wav.file.read(reinterpret_cast<uint8_t*>(monoBuffer), payloadBytes);
         if (readBytes == 0) {
+            if (wav.isSdStream) {
+                invalidateSdMount("read error while streaming (mono)");
+            }
             wav.active = false;
             g_audioPlaybackActive = false;
             resetWavStreamState(wav);
@@ -605,6 +667,9 @@ static void feedWavStreamChunk(WavStreamState& wav) {
         payloadBytes = static_cast<size_t>(frames) * 2 * sizeof(int16_t);
         const size_t readBytes = wav.file.read(reinterpret_cast<uint8_t*>(interleaved), payloadBytes);
         if (readBytes == 0) {
+            if (wav.isSdStream) {
+                invalidateSdMount("read error while streaming (stereo)");
+            }
             wav.active = false;
             g_audioPlaybackActive = false;
             resetWavStreamState(wav);
@@ -636,10 +701,22 @@ static void feedWavStreamChunk(WavStreamState& wav) {
         wav.dataBytesRemaining -= consumedBytes;
     }
 
-    if (wav.dataBytesRemaining == 0 || !wav.file.available()) {
+    if (wav.dataBytesRemaining == 0) {
         wav.active = false;
         g_audioPlaybackActive = false;
         Serial.print("\n[AUDIO] Playback finished");
+        resetWavStreamState(wav);
+        return;
+    }
+
+    if (!wav.file.available()) {
+        if (wav.isSdStream) {
+            invalidateSdMount("stream ended unexpectedly (card removed?)");
+        }
+        wav.active = false;
+        g_audioPlaybackActive = false;
+        Serial.println("\n[AUDIO] WAV stream interrupted before data chunk end");
+        Serial.println("\n[AUDIO] Playback finished");
         resetWavStreamState(wav);
     }
 }
@@ -935,28 +1012,30 @@ static bool queuePlayFlashFileByPath(const char* path) {
 
 static bool playChimeByPathWithFallback(const char* sdPath, const char* chimeLabel) {
     if (g_audioQueue == nullptr) {
-        Serial.printf("\n[AUDIO][CHIME] %s: очередь недоступна", chimeLabel);
+        Serial.printf("\n[AUDIO][BELL] %s: очередь недоступна", chimeLabel);
         return false;
     }
 
-    if (ensureSdMounted() && SD.exists(sdPath)) {
-        if (queuePlaySdFileByPath(sdPath)) {
-            Serial.printf("\n[AUDIO][CHIME] %s: microSD %s", chimeLabel, sdPath);
+    char resolvedSdPath[96] = {0};
+    const char* baseName = (sdPath && sdPath[0] == '/') ? (sdPath + 1) : sdPath;
+    if (resolveSdChimePath(baseName, resolvedSdPath, sizeof(resolvedSdPath))) {
+        if (queuePlaySdFileByPath(resolvedSdPath)) {
+            Serial.printf("\n[AUDIO][BELL] %s: microSD %s", chimeLabel, resolvedSdPath);
             return true;
         }
-        Serial.printf("\n[AUDIO][CHIME] %s: не удалось поставить в очередь microSD %s", chimeLabel, sdPath);
+        Serial.printf("\n[AUDIO][BELL] %s: не удалось поставить в очередь microSD %s", chimeLabel, resolvedSdPath);
     }
 
     if (ensureFlashFsMounted() && SPIFFS.exists(FLASH_CHIMES_WAV)) {
         if (queuePlayFlashFileByPath(FLASH_CHIMES_WAV)) {
-            Serial.printf("\n[AUDIO][CHIME] %s: fallback Flash %s", chimeLabel, FLASH_CHIMES_WAV);
+            Serial.printf("\n[AUDIO][BELL] %s: fallback Flash %s", chimeLabel, FLASH_CHIMES_WAV);
             return true;
         }
-        Serial.printf("\n[AUDIO][CHIME] %s: не удалось поставить fallback %s", chimeLabel, FLASH_CHIMES_WAV);
+        Serial.printf("\n[AUDIO][BELL] %s: не удалось поставить fallback %s", chimeLabel, FLASH_CHIMES_WAV);
         return false;
     }
 
-    Serial.printf("\n[AUDIO][CHIME] %s: файл не найден (microSD/Flash), пропуск", chimeLabel);
+    Serial.printf("\n[AUDIO][BELL] %s: файл не найден (microSD/Flash), пропуск", chimeLabel);
     return false;
 }
 
