@@ -15,7 +15,8 @@ bool g_wifiOwnedByOta = false;
 unsigned long g_windowDeadlineMs = 0;
 bool g_bleWasEnabledBeforeOta = false;
 bool g_otaDisableInProgress = false;
-bool g_restoreBlePending = false;
+unsigned long g_lastProgressMs = 0;
+unsigned int g_lastProgressPercent = 0;
 
 bool connectWifiForOta() {
     if (WiFi.status() == WL_CONNECTED) {
@@ -70,6 +71,8 @@ bool connectWifiForOta() {
 void setupCallbacks() {
     ArduinoOTA.onStart([]() {
         g_otaBusy = true;
+        g_lastProgressMs = millis();
+        g_lastProgressPercent = 0;
         const char* type = (ArduinoOTA.getCommand() == U_FLASH) ? "прошивка" : "файловая система";
         Serial.printf("\n[OTA] START: %s", type);
     });
@@ -80,10 +83,10 @@ void setupCallbacks() {
     });
 
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        static unsigned int lastPercent = 0;
         unsigned int percent = (total > 0) ? (progress * 100U / total) : 0;
-        if (percent >= lastPercent + 10 || percent == 100) {
-            lastPercent = percent;
+        g_lastProgressMs = millis();
+        if (percent >= g_lastProgressPercent + 5 || percent == 100) {
+            g_lastProgressPercent = percent;
             Serial.printf("\n[OTA] Progress: %u%%", percent);
         }
     });
@@ -137,15 +140,20 @@ bool otaEnable(uint32_t windowMs) {
     String host = String("nixie-") + serialSafe;
     host.replace(" ", "-");
 
+    constexpr uint16_t kOtaPort = 3232;
     ArduinoOTA.setHostname(host.c_str());
+    ArduinoOTA.setPort(kOtaPort);
     ArduinoOTA.setPassword(OTA_PASSWORD);
     setupCallbacks();
     ArduinoOTA.begin();
 
     g_otaEnabled = true;
     g_windowDeadlineMs = millis() + windowMs;
+    g_lastProgressMs = millis();
+    g_lastProgressPercent = 0;
 
     Serial.printf("\n[OTA] READY: %s IP: %s", host.c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("\n[OTA] Port: %u", static_cast<unsigned>(kOtaPort));
     Serial.printf("\n[OTA] Password: %s", OTA_PASSWORD);
     Serial.printf("\n[OTA] Окно обновления: %lu сек", static_cast<unsigned long>(windowMs / 1000UL));
     return true;
@@ -191,8 +199,10 @@ void otaDisable() {
     }
 
     if (g_bleWasEnabledBeforeOta) {
-        // Восстанавливаем BLE отложенно в otaProcess(), чтобы избежать тяжёлой деинициализации в этом же стеке.
-        g_restoreBlePending = true;
+        // На некоторых ESP32-S3 повторная BLE init/deinit после OTA вызывает зависания.
+        // Оставляем BLE выключенным и предлагаем включить вручную командой bon.
+        Serial.print("\n[OTA] BLE оставлен выключенным (включите вручную: bon)");
+        g_bleWasEnabledBeforeOta = false;
     }
 
     Serial.print("\n[OTA] OFF");
@@ -200,14 +210,6 @@ void otaDisable() {
 }
 
 void otaProcess() {
-    if (g_restoreBlePending) {
-        g_restoreBlePending = false;
-        if (!bleTerminalIsEnabled()) {
-            bleTerminalEnable();
-        }
-        g_bleWasEnabledBeforeOta = false;
-    }
-
     if (!g_otaEnabled) {
         return;
     }
@@ -219,6 +221,14 @@ void otaProcess() {
     }
 
     ArduinoOTA.handle();
+
+    const unsigned long now = millis();
+    if (g_otaBusy && (now - g_lastProgressMs) >= 5000UL) {
+        Serial.printf("\n[OTA] WARN: нет прогресса %lu c (последний %u%%)",
+                      static_cast<unsigned long>((now - g_lastProgressMs) / 1000UL),
+                      g_lastProgressPercent);
+        g_lastProgressMs = now;
+    }
 
     if (!g_otaBusy && g_windowDeadlineMs > 0 && millis() >= g_windowDeadlineMs) {
         Serial.print("\n[OTA] Окно обслуживания закрыто");

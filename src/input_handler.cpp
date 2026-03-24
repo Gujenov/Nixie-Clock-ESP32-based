@@ -33,7 +33,7 @@ void initInputHandler() {
     if (!encoderInitialized) {
         lastEncoderPos = encoder.getCount();
         encoderInitialized = true;
-        Serial.print("\n[INPUT] Input handler initialized");
+        Serial.println("\n[INPUT] Input handler initialized");
     }
 }
 

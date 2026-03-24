@@ -52,6 +52,17 @@ public:
                              uint8_t alarm1Hour, uint8_t alarm1Minute,
                              uint8_t alarm2Hour, uint8_t alarm2Minute);
 
+    // Политика активности/гашения дисплея (расписание + временная ручная активация)
+    bool isDisplayActiveBySchedule(const tm& localTm) const;
+    bool isDisplayActiveNow(const tm& localTm);
+    void triggerSleepOverrideIfNeeded(const tm& localTm);
+    bool isSleepOverrideActive() const;
+
+    // Форматирование расписания (склейка интервалов для вывода)
+    void formatDisplayActivityIntervalsForWorkdays(char* out, size_t outSize) const;
+    void formatDisplayActivityIntervalsForHolidays(char* out, size_t outSize) const;
+    void formatDisplayActivityIntervalsForCurrentDay(const tm& localTm, char* out, size_t outSize) const;
+
     // Политика выполнения тика для разных типов часов
     bool shouldUpdateOnSecond(uint8_t second) const;
     DisplayTickMode tickMode() const;
@@ -91,4 +102,15 @@ private:
     uint8_t debugMm_ = 0;
     uint8_t debugSs_ = 0;
     bool debugAvailable_ = false;
+
+    bool sleepOverrideUntilSchedule_ = false;
+
+    static bool isHourInHalfOpenRange(uint8_t hour, uint8_t startHour, uint8_t endHour);
+    static void formatDisplayActivityIntervalsInternal(uint8_t start1,
+                                                       uint8_t end1,
+                                                       uint8_t start2,
+                                                       uint8_t end2,
+                                                       char* out,
+                                                       size_t outSize);
+    static bool isHolidayDay(const tm& localTm);
 };

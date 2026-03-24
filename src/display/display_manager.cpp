@@ -45,6 +45,166 @@ VirtualDisplayDriver g_mech2(0x15);
 VirtualDisplayDriver g_mechPend(0x16);
 }
 
+bool DisplayManager::isHolidayDay(const tm& localTm) {
+    return (localTm.tm_wday == 0 || localTm.tm_wday == 6);
+}
+
+bool DisplayManager::isHourInHalfOpenRange(uint8_t hour, uint8_t startHour, uint8_t endHour) {
+    if (hour > 23 || startHour > 24 || endHour > 24) {
+        return true;
+    }
+
+    if (startHour == 0 && endHour == 24) {
+        return true;
+    }
+
+    if (startHour == endHour) {
+        return false;
+    }
+
+    if (startHour < endHour) {
+        return (hour >= startHour) && (hour < endHour);
+    }
+
+    return (hour >= startHour) || (hour < endHour);
+}
+
+void DisplayManager::formatDisplayActivityIntervalsInternal(uint8_t start1,
+                                                            uint8_t end1,
+                                                            uint8_t start2,
+                                                            uint8_t end2,
+                                                            char* out,
+                                                            size_t outSize) {
+    if (!out || outSize == 0) {
+        return;
+    }
+
+    struct Interval {
+        uint8_t start;
+        uint8_t end;
+    };
+
+    Interval intervals[2] = {
+        {start1, end1},
+        {start2, end2}
+    };
+
+    Interval normalized[2];
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < 2; ++i) {
+        const uint8_t s = intervals[i].start;
+        const uint8_t e = intervals[i].end;
+        if (s > 24 || e > 24 || s == e) {
+            continue;
+        }
+        normalized[count++] = {s, e};
+    }
+
+    if (count == 0) {
+        strlcpy(out, "нет активных интервалов", outSize);
+        return;
+    }
+
+    if (count == 2 && normalized[1].start < normalized[0].start) {
+        const Interval tmp = normalized[0];
+        normalized[0] = normalized[1];
+        normalized[1] = tmp;
+    }
+
+    Interval merged[2];
+    uint8_t mergedCount = 0;
+    for (uint8_t i = 0; i < count; ++i) {
+        if (mergedCount == 0) {
+            merged[mergedCount++] = normalized[i];
+            continue;
+        }
+
+        Interval& last = merged[mergedCount - 1];
+        if (normalized[i].start <= last.end) {
+            if (normalized[i].end > last.end) {
+                last.end = normalized[i].end;
+            }
+        } else {
+            merged[mergedCount++] = normalized[i];
+        }
+    }
+
+    if (mergedCount == 1) {
+        snprintf(out, outSize, "%u-%u",
+                 static_cast<unsigned>(merged[0].start),
+                 static_cast<unsigned>(merged[0].end));
+        return;
+    }
+
+    snprintf(out, outSize, "%u-%u, %u-%u",
+             static_cast<unsigned>(merged[0].start),
+             static_cast<unsigned>(merged[0].end),
+             static_cast<unsigned>(merged[1].start),
+             static_cast<unsigned>(merged[1].end));
+}
+
+bool DisplayManager::isDisplayActiveBySchedule(const tm& localTm) const {
+    const bool isHoliday = isHolidayDay(localTm);
+    const uint8_t hour = static_cast<uint8_t>((localTm.tm_hour < 0) ? 0 : (localTm.tm_hour % 24));
+
+    const uint8_t start1 = isHoliday ? config.display_holiday_active_start_hour : config.display_active_start_hour;
+    const uint8_t end1 = isHoliday ? config.display_holiday_active_end_hour : config.display_active_end_hour;
+    const uint8_t start2 = isHoliday ? config.display_holiday_active_start_hour_2 : config.display_active_start_hour_2;
+    const uint8_t end2 = isHoliday ? config.display_holiday_active_end_hour_2 : config.display_active_end_hour_2;
+
+    const bool inTime1 = isHourInHalfOpenRange(hour, start1, end1);
+    const bool inTime2 = isHourInHalfOpenRange(hour, start2, end2);
+    return (inTime1 || inTime2);
+}
+
+void DisplayManager::triggerSleepOverrideIfNeeded(const tm& localTm) {
+    if (sleepOverrideUntilSchedule_) {
+        return;
+    }
+
+    if (!isDisplayActiveBySchedule(localTm)) {
+        sleepOverrideUntilSchedule_ = true;
+    }
+}
+
+bool DisplayManager::isDisplayActiveNow(const tm& localTm) {
+    const bool scheduleActive = isDisplayActiveBySchedule(localTm);
+    if (sleepOverrideUntilSchedule_ && scheduleActive) {
+        sleepOverrideUntilSchedule_ = false;
+    }
+    return scheduleActive || sleepOverrideUntilSchedule_;
+}
+
+bool DisplayManager::isSleepOverrideActive() const {
+    return sleepOverrideUntilSchedule_;
+}
+
+void DisplayManager::formatDisplayActivityIntervalsForWorkdays(char* out, size_t outSize) const {
+    formatDisplayActivityIntervalsInternal(config.display_active_start_hour,
+                                           config.display_active_end_hour,
+                                           config.display_active_start_hour_2,
+                                           config.display_active_end_hour_2,
+                                           out,
+                                           outSize);
+}
+
+void DisplayManager::formatDisplayActivityIntervalsForHolidays(char* out, size_t outSize) const {
+    formatDisplayActivityIntervalsInternal(config.display_holiday_active_start_hour,
+                                           config.display_holiday_active_end_hour,
+                                           config.display_holiday_active_start_hour_2,
+                                           config.display_holiday_active_end_hour_2,
+                                           out,
+                                           outSize);
+}
+
+void DisplayManager::formatDisplayActivityIntervalsForCurrentDay(const tm& localTm, char* out, size_t outSize) const {
+    if (isHolidayDay(localTm)) {
+        formatDisplayActivityIntervalsForHolidays(out, outSize);
+    } else {
+        formatDisplayActivityIntervalsForWorkdays(out, outSize);
+    }
+}
+
 void DisplayManager::attach(DisplayDriver* driver) {
     driver_ = driver;
 }
@@ -60,6 +220,11 @@ void DisplayManager::begin() {
         isNixie6_ = true;
         activeBackend_ = ActiveBackend::Nixie6;
         tickMode_ = DisplayTickMode::EverySecond;
+        Serial.printf("\n[DISP] backend=Nixie6 74HC595 DATA=%u CLK=%u LATCH=%u OE=%u",
+                      static_cast<unsigned>(HSPI_MOSI_PIN),
+                      static_cast<unsigned>(HSPI_SCK_PIN),
+                      static_cast<unsigned>(HSPI_CS_PIN),
+                      static_cast<unsigned>(SR595_OE_PIN));
     } else {
         switch (config.clock_type) {
             case CLOCK_TYPE_NIXIE:
@@ -98,6 +263,10 @@ void DisplayManager::begin() {
                 tickMode_ = DisplayTickMode::EveryMinute;
                 break;
         }
+
+            Serial.printf("\n[DISP] backend=virtual type=%u digits=%u (74HC595 физически не обновляется)",
+                      static_cast<unsigned>(config.clock_type),
+                      static_cast<unsigned>(config.clock_digits));
     }
 
     if (driver_) {

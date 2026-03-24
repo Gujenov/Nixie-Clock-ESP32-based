@@ -62,4 +62,5 @@ def _send_ota_on(source, target, env=None, **kwargs):
     print("[OTA-AUTO] Проверьте, что Serial Monitor закрыт и COM-порт не занят другой программой")
 
 
-env.AddPreAction("upload", _send_ota_on)
+env.AddPreAction("upload", _send_ota_on)    # type: ignore[name-defined]
+env.AddPreAction("uploadfs", _send_ota_on)  # type: ignore[name-defined]

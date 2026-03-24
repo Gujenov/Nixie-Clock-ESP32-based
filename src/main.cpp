@@ -46,31 +46,16 @@ struct AntiPoisonState {
 
 static AntiPoisonState antiPoisonState;
 
-static bool isHourInHalfOpenRange(uint8_t hour, uint8_t startHour, uint8_t endHour) {
-    if (hour > 23 || startHour > 24 || endHour > 24) {
-        return true;
+static void triggerDisplaySleepOverrideIfNeeded() {
+    const time_t utcNow = getCurrentUTCTime();
+    const time_t localNow = utcToLocal(utcNow);
+    tm localTm{};
+    gmtime_r(&localNow, &localTm);
+
+    if (!displayManager.isSleepOverrideActive() && !displayManager.isDisplayActiveBySchedule(localTm)) {
+        displayManager.triggerSleepOverrideIfNeeded(localTm);
+        Serial.print("\n[DISP] Ручная активация: выход из текущего цикла гашения");
     }
-
-    if (startHour == 0 && endHour == 24) {
-        return true;
-    }
-
-    if (startHour == endHour) {
-        return false;
-    }
-
-    if (startHour < endHour) {
-        return (hour >= startHour) && (hour < endHour);
-    }
-
-    return (hour >= startHour) || (hour < endHour);
-}
-
-static bool isDisplayActiveBySchedule(const tm& localTm) {
-    const uint8_t hour = static_cast<uint8_t>((localTm.tm_hour < 0) ? 0 : (localTm.tm_hour % 24));
-    return isHourInHalfOpenRange(hour,
-                                 config.display_active_start_hour,
-                                 config.display_active_end_hour);
 }
 
 static void printRuntimeStateSnapshot() {
@@ -79,17 +64,27 @@ static void printRuntimeStateSnapshot() {
     tm localTm{};
     gmtime_r(&localNow, &localTm);
 
-    const bool displayActiveNow = isDisplayActiveBySchedule(localTm);
+    const bool displayActiveNow = displayManager.isDisplayActiveNow(localTm);
     const bool bellEnabled = bellSchedulerIsEnabled();
     const bool bellWindowActive = bellSchedulerIsWindowActive(localTm);
+    char displayIntervalsCurrent[40] = {0};
+    char displayIntervalsWorkdays[40] = {0};
+    char displayIntervalsHolidays[40] = {0};
+    displayManager.formatDisplayActivityIntervalsForCurrentDay(localTm,
+                                                               displayIntervalsCurrent,
+                                                               sizeof(displayIntervalsCurrent));
+    displayManager.formatDisplayActivityIntervalsForWorkdays(displayIntervalsWorkdays,
+                                                             sizeof(displayIntervalsWorkdays));
+    displayManager.formatDisplayActivityIntervalsForHolidays(displayIntervalsHolidays,
+                                                             sizeof(displayIntervalsHolidays));
 
     Serial.print("\nТекущее состояние часов:");
-    Serial.printf("\n[DISP] %s", displayActiveNow ? "дисплей активен" : "режим гашения индикаторов");
-    Serial.printf("\n[DISP] Время активности дисплея: %u-%u",
-                  static_cast<unsigned>(config.display_active_start_hour),
-                  static_cast<unsigned>(config.display_active_end_hour));
+    Serial.printf("\n[DISP] %s", displayActiveNow ? "Дисплей активен" : "Режим сна для дисплея (дисплей неактивен)");
+    Serial.printf("\n[DISP] Текущее время активности дисплея: %s", displayIntervalsCurrent);
+    Serial.printf("\n[DISP] Настройка будни: %s", displayIntervalsWorkdays);
+    Serial.printf("\n[DISP] Настройка выходные: %s", displayIntervalsHolidays);
 
-    Serial.printf("\n[BELL] %s", bellEnabled ? "бой вкл" : "бой выкл");
+    Serial.printf("\n[BELL] %s", bellEnabled ? "Бой включен в настройках" : "Бой отключен в настройках");
     if (bellEnabled) {
         if (bellWindowActive) {
             Serial.printf("\n[BELL] Время активности боя: %u-%u",
@@ -107,9 +102,9 @@ static bool isAntiPoisonActive() {
     return antiPoisonState.active;
 }
 
-static void startCathodesAntiPoisonProcedure() {
+static bool startCathodesAntiPoisonProcedure() {
     if (antiPoisonState.active) {
-        return;
+        return false;
     }
 
     antiPoisonState.active = true;
@@ -117,6 +112,26 @@ static void startCathodesAntiPoisonProcedure() {
     antiPoisonState.digit = 1;
     antiPoisonState.nextStepMs = 0;
     Serial.println("Kathodes anti-poison procedure started");
+    return true;
+}
+
+static bool ensureDisplayActiveForManualAntiPoison() {
+    const time_t utcNow = getCurrentUTCTime();
+    const time_t localNow = utcToLocal(utcNow);
+    tm localTm{};
+    gmtime_r(&localNow, &localTm);
+
+    const bool displayActiveNow = displayManager.isDisplayActiveNow(localTm);
+    if (!displayActiveNow) {
+        displayManager.triggerSleepOverrideIfNeeded(localTm);
+        Serial.println("[ANTIPOISON] Ручной запуск: выхожу из режима гашения дисплея");
+    }
+
+    if (!isDisplayOutputEnabled()) {
+        setDisplayOutputEnabled(true);
+    }
+
+    return true;
 }
 
 static void serviceCathodesAntiPoisonProcedure(uint32_t nowMs) {
@@ -151,7 +166,13 @@ void runAntiPoisonNow() {
         Serial.println("[ANTIPOISON] Пропущено: режим не Nixie");
         return;
     }
-    startCathodesAntiPoisonProcedure();
+    if (!ensureDisplayActiveForManualAntiPoison()) {
+        Serial.println("[ANTIPOISON] Ручной запуск невозможен: дисплей не активирован");
+        return;
+    }
+    if (!startCathodesAntiPoisonProcedure()) {
+        Serial.println("[ANTIPOISON] Процедура уже выполняется");
+    }
 }
 
 void processSecondTick();
@@ -220,21 +241,23 @@ static void handleDisplayButtonAction(uint8_t buttonEvent) {
 }
 
 static void onButtonEvent(uint8_t buttonEvent) {
+    triggerDisplaySleepOverrideIfNeeded();
     handleDisplayButtonAction(buttonEvent);
 }
 
 static void onAlarmButtonEvent(uint8_t buttonEvent) {
+    triggerDisplaySleepOverrideIfNeeded();
     handleDisplayButtonAction(buttonEvent);
 
     switch (buttonEvent) {
         case BUTTON_PRESSED:
-            Serial.printf("\n[ALARM_BTN] Short press - %s active", displayManager.activeViewName());
+            Serial.printf("\n[ALARM_BTN] Short press - %s active\n", displayManager.activeViewName());
             break;
         case BUTTON_LONG:
-            Serial.printf("\n[ALARM_BTN] Long press (1s) - %s active", displayManager.activeViewName());
+            Serial.printf("\n[ALARM_BTN] Long press (1s) - %s active\n", displayManager.activeViewName());
             break;
         case BUTTON_VERY_LONG:
-            Serial.printf("\n[ALARM_BTN] Very long press (3s) - %s active", displayManager.activeViewName());
+            Serial.printf("\n[ALARM_BTN] Very long press (3s) - %s active\n", displayManager.activeViewName());
             break;
         default:
             break;
@@ -243,6 +266,8 @@ static void onAlarmButtonEvent(uint8_t buttonEvent) {
 
 static void onEncoderEvent(int32_t delta, int32_t position) {
     (void)position;
+
+    triggerDisplaySleepOverrideIfNeeded();
 
     const PlatformCapabilities& caps = platformGetCapabilities();
     if (!caps.controls_enabled || !caps.encoder_enabled) {
@@ -264,7 +289,7 @@ void setup() {
     delay(2000); // Небольшая задержка для корректной работы UART при старте
     initHardware();
     const esp_reset_reason_t rr = esp_reset_reason();
-    Serial.printf("\n[BOOT] reset reason: %s (%d)", resetReasonText(rr), static_cast<int>(rr));
+    Serial.printf("\n[BOOT] reset reason: %s", resetReasonText(rr));
     initConfiguration();
     runtimeCounterInit();
     platformRefreshCapabilities();
@@ -277,14 +302,6 @@ void setup() {
     // BLE включен по умолчанию (команды ble on/off остаются рабочими)
     bleTerminalEnable();
     otaInit();
-    if (platformGetCapabilities().sound_enabled) {
-        audioTaskStart();
-    } else {
-        Serial.print("\n[AUDIO] Подсистема отключена, audioTask не запущена");
-    }
-    
-    // DEBUG: Асинхронная синхронизация - не блокирует setup()
-    syncTimeAsync();
     
     initInputHandler();
     setButtonCallback(onButtonEvent);
@@ -293,6 +310,15 @@ void setup() {
 
         printRuntimeStateSnapshot();
     
+    // Асинхронная синхронизация - не блокирует setup()
+    syncTimeAsync();
+
+    if (platformGetCapabilities().sound_enabled) {
+        audioTaskStart();
+    } else {
+        Serial.print("\n[AUDIO] Подсистема отключена, audioTask не запущена");
+    }
+
     Serial.print("\n\n=== Система готова ===");
     Serial.println("\n\nhelp / ? - Перечень доступных команд");
     // Инициализация меню (флаги уже инициализированы в menu_manager.cpp)
@@ -315,9 +341,9 @@ void loop() {
     bleTerminalProcess();
     otaProcess();
 
-    // Во время передачи OTA приоритет — сетевой стек/обработчик OTA.
-    // Пропускаем тяжёлую логику цикла, чтобы не получить таймаут upload.
-    if (otaIsBusy()) {
+    // Во время OTA-окна приоритет — сетевой стек/обработчик OTA.
+    // Это снижает риск подвисаний после auth, до старта передачи данных.
+    if (otaIsEnabled()) {
         delay(2);
         return;
     }
@@ -431,7 +457,12 @@ void processSecondTick() {
     struct tm local_tm_info;
     gmtime_r(&localTime, &local_tm_info);
     uint8_t currentSecond = tm_info->tm_sec;
-    const bool displayActiveNow = isDisplayActiveBySchedule(local_tm_info);
+    const bool displayActiveByScheduleNow = displayManager.isDisplayActiveBySchedule(local_tm_info);
+    const bool overrideWasActive = displayManager.isSleepOverrideActive();
+    const bool displayActiveNow = displayManager.isDisplayActiveNow(local_tm_info);
+    if (overrideWasActive && !displayManager.isSleepOverrideActive() && displayActiveByScheduleNow) {
+        Serial.println("\n[DISP] Ручная активация сброшена: наступил штатный интервал активности");
+    }
 
     const int32_t hourMarker = (local_tm_info.tm_yday * 24) + local_tm_info.tm_hour;
     const bool shouldRunAntiPoison = isNixieCathodeDisplay() &&
@@ -441,8 +472,9 @@ void processSecondTick() {
                                      hourMarker != lastAntiPoisonHourMarker;
 
     if (shouldRunAntiPoison) {
-        startCathodesAntiPoisonProcedure();
-        lastAntiPoisonHourMarker = hourMarker;
+        if (startCathodesAntiPoisonProcedure()) {
+            lastAntiPoisonHourMarker = hourMarker;
+        }
     }
 
     chimeSchedulerOnTick(local_tm_info);
@@ -472,13 +504,13 @@ void processSecondTick() {
         bellStateInitialized = true;
     } else if (prevBellEnabled != bellEnabled || prevBellActive != bellActive) {
         if (!bellEnabled) {
-            Serial.print("\n[BELL] Бой отключен");
+            Serial.println("\n[BELL] Бой отключен в настройках");
         } else if (!bellActive) {
-            Serial.print("\n[BELL] Активен режим тишины - бой временно неактивен");
+            Serial.println("\n[BELL] Активен режим тишины - бой временно неактивен");
         } else if (prevBellEnabled && !prevBellActive) {
-            Serial.print("\n[BELL] Режим боя восстановлен - выход из режима тишины");
+            Serial.println("\n[BELL] Режим боя восстановлен - выход из режима тишины");
         } else {
-            Serial.print("\n[BELL] Бой включен");
+            Serial.println("\n[BELL] Бой включен в настройках и активен по расписанию");
         }
         prevBellEnabled = bellEnabled;
         prevBellActive = bellActive;

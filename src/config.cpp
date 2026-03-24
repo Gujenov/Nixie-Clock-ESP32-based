@@ -45,6 +45,12 @@ void applyNewUserSettingsDefaults() {
   config.brightness_sensor_min = 100;
   config.display_active_start_hour = 0;
   config.display_active_end_hour = 24;
+  config.display_active_start_hour_2 = 0;
+  config.display_active_end_hour_2 = 0;
+  config.display_holiday_active_start_hour = 0;
+  config.display_holiday_active_end_hour = 24;
+  config.display_holiday_active_start_hour_2 = 0;
+  config.display_holiday_active_end_hour_2 = 0;
 
   config.light_filter_samples = 8;
   config.light_sensor_resolution_bits = 10;
@@ -220,6 +226,12 @@ void initConfiguration() {
   }
   if (config.display_active_start_hour > 24) config.display_active_start_hour = 0;
   if (config.display_active_end_hour > 24) config.display_active_end_hour = 24;
+  if (config.display_active_start_hour_2 > 24) config.display_active_start_hour_2 = 0;
+  if (config.display_active_end_hour_2 > 24) config.display_active_end_hour_2 = 0;
+  if (config.display_holiday_active_start_hour > 24) config.display_holiday_active_start_hour = 0;
+  if (config.display_holiday_active_end_hour > 24) config.display_holiday_active_end_hour = 24;
+  if (config.display_holiday_active_start_hour_2 > 24) config.display_holiday_active_start_hour_2 = 0;
+  if (config.display_holiday_active_end_hour_2 > 24) config.display_holiday_active_end_hour_2 = 0;
 
   if (config.light_filter_samples == 0 || config.light_filter_samples > 64) {
     config.light_filter_samples = 8;
@@ -367,6 +379,12 @@ void setDefaultConfig() {
     config.brightness_sensor_min = 100;
     config.display_active_start_hour = 0;
     config.display_active_end_hour = 24;
+    config.display_active_start_hour_2 = 0;
+    config.display_active_end_hour_2 = 0;
+    config.display_holiday_active_start_hour = 0;
+    config.display_holiday_active_end_hour = 24;
+    config.display_holiday_active_start_hour_2 = 0;
+    config.display_holiday_active_end_hour_2 = 0;
 
     config.light_filter_samples = 8;
     config.light_sensor_resolution_bits = 10;

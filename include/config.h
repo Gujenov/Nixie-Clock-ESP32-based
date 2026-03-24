@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260323"
+#define FIRMWARE_VERSION "1.A0.3.260324"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -152,8 +152,14 @@ struct Config {
     bool brightness_control_enabled;
     uint16_t brightness_sensor_max;   // Калибровка верхнего порога (0..1023)
     uint16_t brightness_sensor_min;   // Калибровка нижнего порога (0..1023)
-    uint8_t display_active_start_hour; // 0..24
-    uint8_t display_active_end_hour;   // 0..24
+    uint8_t display_active_start_hour;   // workdays time_1 start, 0..24
+    uint8_t display_active_end_hour;     // workdays time_1 end, 0..24
+    uint8_t display_active_start_hour_2; // workdays time_2 start, 0..24
+    uint8_t display_active_end_hour_2;   // workdays time_2 end, 0..24
+    uint8_t display_holiday_active_start_hour;   // holidays time_1 start, 0..24
+    uint8_t display_holiday_active_end_hour;     // holidays time_1 end, 0..24
+    uint8_t display_holiday_active_start_hour_2; // holidays time_2 start, 0..24
+    uint8_t display_holiday_active_end_hour_2;   // holidays time_2 end, 0..24
 
     // Параметры фильтра датчика освещенности
     uint8_t light_filter_samples;      // 1..64

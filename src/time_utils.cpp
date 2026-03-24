@@ -722,12 +722,37 @@ bool isValidDate(int day, int month, int year) {
     return day >= 1 && day <= 31;
 }
 
+static bool parseDateWithFlexibleYear(const String& rawDate, int& day, int& month, int& year) {
+    char yearToken[8] = {0};
+    if (sscanf(rawDate.c_str(), "%d.%d.%7s", &day, &month, yearToken) != 3) {
+        return false;
+    }
+
+    const size_t yearLen = strlen(yearToken);
+    if (yearLen != 2 && yearLen != 4) {
+        return false;
+    }
+
+    for (size_t i = 0; i < yearLen; ++i) {
+        if (!isDigit(yearToken[i])) {
+            return false;
+        }
+    }
+
+    year = atoi(yearToken);
+    if (yearLen == 2) {
+        year += 2000;
+    }
+
+    return true;
+}
+
 // Установка даты (день.месяц.год)
 bool setManualDate(const String &dateStr) {
     int day, month, year;
     
-    if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
-        Serial.print("\nОшибка формата даты. Используйте DD.MM.YYYY\n");
+    if (!parseDateWithFlexibleYear(dateStr, day, month, year)) {
+        Serial.print("\nОшибка формата даты. Используйте DD.MM.YY или DD.MM.YYYY\n");
         return false;
     }
 
@@ -829,8 +854,8 @@ bool setManualLocalTime(const String &timeStr) {
 bool setManualLocalDate(const String &dateStr) {
     int day, month, year;
     
-    if (sscanf(dateStr.c_str(), "%d.%d.%d", &day, &month, &year) != 3) {
-        Serial.print("\nОшибка формата даты. Используйте DD.MM.YYYY\n");
+    if (!parseDateWithFlexibleYear(dateStr, day, month, year)) {
+        Serial.print("\nОшибка формата даты. Используйте DD.MM.YY или DD.MM.YYYY\n");
         return false;
     }
 

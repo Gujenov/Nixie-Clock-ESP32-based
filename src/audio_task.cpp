@@ -20,6 +20,7 @@ constexpr uint32_t AUDIO_SAMPLE_RATE = 16000;
 constexpr uint16_t AUDIO_CHUNK_SAMPLES = 256;
 constexpr uint8_t AUDIO_TASK_CORE = 1;
 constexpr UBaseType_t AUDIO_TASK_PRIO = 1;
+constexpr uint32_t SD_REPROBE_INTERVAL_MS = 60000UL;
 
 enum class AudioCommandType : uint8_t {
     PlayFlashFile,
@@ -72,6 +73,7 @@ static QueueHandle_t g_audioQueue = nullptr;
 static bool g_i2sReady = false;
 static bool g_flashFsReady = false;
 static bool g_sdReady = false;
+static uint32_t g_lastSdProbeMs = 0;
 static AudioTestSource g_lastTestSource = AudioTestSource::None;
 static SPIClass g_sdSpi(FSPI);
 
@@ -81,6 +83,7 @@ static void invalidateSdMount(const char* reason = nullptr) {
     }
     g_sdReady = false;
     SD.end();
+    g_lastSdProbeMs = millis();
 }
 
 static void resetWavStreamState(WavStreamState& wav) {
@@ -113,7 +116,7 @@ static bool ensureFlashFsMounted() {
     return true;
 }
 
-static bool ensureSdMounted() {
+static bool ensureSdMounted(bool forceProbe = false) {
     if (g_sdReady) {
         if (SD.cardType() == CARD_NONE) {
             invalidateSdMount("card removed");
@@ -122,8 +125,18 @@ static bool ensureSdMounted() {
         return true;
     }
 
+    if (!forceProbe && g_lastSdProbeMs != 0) {
+        const uint32_t elapsed = millis() - g_lastSdProbeMs;
+        if (elapsed < SD_REPROBE_INTERVAL_MS) {
+            return false;
+        }
+    }
+
+    g_lastSdProbeMs = millis();
+
     g_sdSpi.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
     if (!SD.begin(SD_SPI_CS_PIN, g_sdSpi)) {
+        SD.end();
         return false;
     }
 
@@ -414,7 +427,7 @@ static const char* selectFlashTestFile() {
 }
 
 static void probeAudioSourcesOnStartup() {
-    const bool sdMounted = ensureSdMounted();
+    const bool sdMounted = ensureSdMounted(true);
     Serial.print(sdMounted ? "\n[AUDIO] microSD найдена" : "\n[AUDIO] microSD не найдена");
 
     if (sdMounted) {
@@ -918,7 +931,7 @@ AudioStartStatus audioPlayFromSdTest() {
     if (g_audioQueue == nullptr) {
         return AudioStartStatus::ErrorQueueUnavailable;
     }
-    if (!ensureSdMounted()) {
+    if (!ensureSdMounted(true)) {
         return AudioStartStatus::ErrorSdCardUnavailable;
     }
 

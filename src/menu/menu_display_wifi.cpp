@@ -1,3 +1,9 @@
+// LEGACY FILE (disabled): kept temporarily to simplify transition.
+// Active implementations moved to:
+//   - src/menu_sound_display.cpp
+//   - src/menu_wifi_ntp.cpp
+// This file is excluded from compilation.
+#if 0
 #include "menu_manager.h"
 
 #include "config.h"
@@ -46,6 +52,118 @@ static bool parseHourRange(const String &raw, uint8_t &startHour, uint8_t &endHo
     return true;
 }
 
+static bool parseDisplayActivityTimesCommand(const String& raw,
+                                             uint8_t& start1,
+                                             uint8_t& end1,
+                                             uint8_t& start2,
+                                             uint8_t& end2) {
+    String s = raw;
+    s.trim();
+
+    const int sep = s.indexOf(' ');
+    if (sep <= 0 || sep >= static_cast<int>(s.length()) - 1) {
+        return false;
+    }
+
+    String r1 = s.substring(0, sep);
+    String r2 = s.substring(sep + 1);
+    r1.trim();
+    r2.trim();
+
+    if (!parseHourRange(r1, start1, end1) || !parseHourRange(r2, start2, end2)) {
+        return false;
+    }
+
+    // Первый интервал: утро/день (0..12), второй: день/вечер (12..24)
+    if (start1 > 12 || end1 > 12) {
+        return false;
+    }
+    if (start2 < 12 || end2 < 12) {
+        return false;
+    }
+
+    // Для этой команды запрещаем перенос через границы внутри полуинтервалов.
+    if (start1 > end1 || start2 > end2) {
+        return false;
+    }
+
+    return true;
+}
+
+static void formatDisplayActivityIntervals(uint8_t start1,
+                                           uint8_t end1,
+                                           uint8_t start2,
+                                           uint8_t end2,
+                                           char* out,
+                                           size_t outSize) {
+    if (!out || outSize == 0) {
+        return;
+    }
+
+    struct Interval {
+        uint8_t start;
+        uint8_t end;
+    };
+
+    Interval intervals[2] = {
+        {start1, end1},
+        {start2, end2}
+    };
+
+    Interval normalized[2];
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < 2; ++i) {
+        const uint8_t s = intervals[i].start;
+        const uint8_t e = intervals[i].end;
+        if (s > 24 || e > 24 || s == e) {
+            continue;
+        }
+        normalized[count++] = {s, e};
+    }
+
+    if (count == 0) {
+        strlcpy(out, "нет активных интервалов", outSize);
+        return;
+    }
+
+    if (count == 2 && normalized[1].start < normalized[0].start) {
+        const Interval tmp = normalized[0];
+        normalized[0] = normalized[1];
+        normalized[1] = tmp;
+    }
+
+    Interval merged[2];
+    uint8_t mergedCount = 0;
+    for (uint8_t i = 0; i < count; ++i) {
+        if (mergedCount == 0) {
+            merged[mergedCount++] = normalized[i];
+            continue;
+        }
+
+        Interval& last = merged[mergedCount - 1];
+        if (normalized[i].start <= last.end) {
+            if (normalized[i].end > last.end) {
+                last.end = normalized[i].end;
+            }
+        } else {
+            merged[mergedCount++] = normalized[i];
+        }
+    }
+
+    if (mergedCount == 1) {
+        snprintf(out, outSize, "%u-%u",
+                 static_cast<unsigned>(merged[0].start),
+                 static_cast<unsigned>(merged[0].end));
+        return;
+    }
+
+    snprintf(out, outSize, "%u-%u, %u-%u",
+             static_cast<unsigned>(merged[0].start),
+             static_cast<unsigned>(merged[0].end),
+             static_cast<unsigned>(merged[1].start),
+             static_cast<unsigned>(merged[1].end));
+}
+
 static volatile bool wifiScanInProgress = false;
 
 static void wifiScanTask(void* param) {
@@ -78,6 +196,20 @@ static void wifiScanTask(void* param) {
 void printDisplayMenu() {
     const bool nixClock = isNixClockForUserMenu();
     const bool soundEnabled = isAlarmFeatureEnabled();
+    char displayIntervalsWorkdays[40] = {0};
+    char displayIntervalsHolidays[40] = {0};
+    formatDisplayActivityIntervals(config.display_active_start_hour,
+                                   config.display_active_end_hour,
+                                   config.display_active_start_hour_2,
+                                   config.display_active_end_hour_2,
+                                   displayIntervalsWorkdays,
+                                   sizeof(displayIntervalsWorkdays));
+    formatDisplayActivityIntervals(config.display_holiday_active_start_hour,
+                                   config.display_holiday_active_end_hour,
+                                   config.display_holiday_active_start_hour_2,
+                                   config.display_holiday_active_end_hour_2,
+                                   displayIntervalsHolidays,
+                                   sizeof(displayIntervalsHolidays));
 
     Serial.println("\n=== ЗВУК И ДИСПЛЕЙ ===");
     Serial.print("\n╔════════════════════════════════════════════════════");
@@ -93,7 +225,8 @@ void printDisplayMenu() {
     }
     Serial.print("\n╠══════════════════════════════");
     if (nixClock) {
-        Serial.printf("\n║ Активность дисплея:   %u-%u", static_cast<unsigned>(config.display_active_start_hour), static_cast<unsigned>(config.display_active_end_hour));
+        Serial.printf("\n║ Активность (будни):   %s", displayIntervalsWorkdays);
+        Serial.printf("\n║ Активность (выходн.): %s", displayIntervalsHolidays);
         Serial.printf("\n║ Автояркость:          %s", config.brightness_control_enabled ? "ВКЛ" : "ВЫКЛ");
         Serial.printf("\n║ Порог max яркости:    %u", static_cast<unsigned>(config.brightness_sensor_max));
         Serial.printf("\n║ Порог min яркости:    %u", static_cast<unsigned>(config.brightness_sensor_min));
@@ -117,10 +250,15 @@ void printDisplayMenu() {
     }
     if (nixClock) {
         Serial.println("\nНастройки дисплея:");
-        Serial.println("  display activity hours / dah HH-HH  - Активность дисплея (полуинтервал [start,end))");
-        Serial.println("  brightness control on/off / bc1/bc0 - Вкл/выкл управление яркостью");
-        Serial.println("  max brightness learning / mbe       - Обучение порога max яркости");
-        Serial.println("  smallest brightness learning / sbe  - Обучение порога min яркости");
+        Serial.println("  display activity workdays / daw HH-HH HH2-HH2  - Активность дисплея (будни)");
+        Serial.println("  display activity holidays / dah HH-HH HH2-HH2  - Активность дисплея (выходные)");
+        Serial.println("  display activity copy w2h / dacw               - Копировать будни -> выходные");
+        Serial.println("  display activity copy h2w / dach               - Копировать выходные -> будни");
+        Serial.println("   До и после полудня (0-12 и 12-24) - полуинтервал [start,end), например: 0-8 16-24");
+        
+        Serial.println("\n  brightness control on/off / bc1/bc0 - Вкл/выкл управление яркостью");
+        Serial.println("  max brightness learning / mbe         - Обучение порога max яркости");
+        Serial.println("  smallest brightness learning / sbe    - Обучение порога min яркости");
     }
         else {
         Serial.println("\nПараметры дисплея недоступны для данного типа часов.");
@@ -260,17 +398,101 @@ void handleDisplayMenu(String command) {
             return;
         }
 
-        if (lower.startsWith("display activity hours ") || lower.startsWith("dah ")) {
-            String arg = lower.startsWith("dah ") ? lower.substring(4) : lower.substring(23);
-            arg.trim();
-            uint8_t sh = 0, eh = 24;
-            if (!parseHourRange(arg, sh, eh)) {
-                Serial.println("Неверный формат. Используйте HH-HH, например: 0-24 или 8-23");
+        if (lower.equals("display activity copy w2h") || lower.equals("dacw")) {
+            config.display_holiday_active_start_hour = config.display_active_start_hour;
+            config.display_holiday_active_end_hour = config.display_active_end_hour;
+            config.display_holiday_active_start_hour_2 = config.display_active_start_hour_2;
+            config.display_holiday_active_end_hour_2 = config.display_active_end_hour_2;
+            saveConfig();
+
+            char mergedIntervals[40] = {0};
+            formatDisplayActivityIntervals(config.display_holiday_active_start_hour,
+                                          config.display_holiday_active_end_hour,
+                                          config.display_holiday_active_start_hour_2,
+                                          config.display_holiday_active_end_hour_2,
+                                          mergedIntervals,
+                                          sizeof(mergedIntervals));
+            Serial.printf("Активность дисплея (выходные) скопирована из будней: %s\n", mergedIntervals);
+            printDisplayMenu();
+            return;
+        }
+
+        if (lower.equals("display activity copy h2w") || lower.equals("dach")) {
+            config.display_active_start_hour = config.display_holiday_active_start_hour;
+            config.display_active_end_hour = config.display_holiday_active_end_hour;
+            config.display_active_start_hour_2 = config.display_holiday_active_start_hour_2;
+            config.display_active_end_hour_2 = config.display_holiday_active_end_hour_2;
+            saveConfig();
+
+            char mergedIntervals[40] = {0};
+            formatDisplayActivityIntervals(config.display_active_start_hour,
+                                          config.display_active_end_hour,
+                                          config.display_active_start_hour_2,
+                                          config.display_active_end_hour_2,
+                                          mergedIntervals,
+                                          sizeof(mergedIntervals));
+            Serial.printf("Активность дисплея (будни) скопирована из выходных: %s\n", mergedIntervals);
+            printDisplayMenu();
+            return;
+        }
+
+        if (lower.startsWith("display activity workdays ") || lower.startsWith("daw ") ||
+            lower.startsWith("display activity times ") || lower.startsWith("dat ")) {
+            String arg;
+            if (lower.startsWith("daw ")) {
+                arg = lower.substring(4);
+            } else if (lower.startsWith("display activity workdays ")) {
+                arg = lower.substring(26);
+            } else if (lower.startsWith("dat ")) {
+                arg = lower.substring(4);
             } else {
-                config.display_active_start_hour = sh;
-                config.display_active_end_hour = eh;
+                arg = lower.substring(23);
+            }
+            arg.trim();
+            uint8_t s1 = 0, e1 = 0, s2 = 12, e2 = 12;
+            if (!parseDisplayActivityTimesCommand(arg, s1, e1, s2, e2)) {
+                Serial.println("Неверный формат. Используйте: daw HH-HH HH2-HH2");
+                Serial.println("Ограничение: первый интервал 0..12, второй 12..24 (например: daw 2-12 12-16)");
+            } else {
+                config.display_active_start_hour = s1;
+                config.display_active_end_hour = e1;
+                config.display_active_start_hour_2 = s2;
+                config.display_active_end_hour_2 = e2;
                 saveConfig();
-                Serial.printf("Активность дисплея: %u-%u\n", static_cast<unsigned>(sh), static_cast<unsigned>(eh));
+                char mergedIntervals[40] = {0};
+                formatDisplayActivityIntervals(config.display_active_start_hour,
+                                              config.display_active_end_hour,
+                                              config.display_active_start_hour_2,
+                                              config.display_active_end_hour_2,
+                                              mergedIntervals,
+                                              sizeof(mergedIntervals));
+                Serial.printf("Активность дисплея (будни): %s\n", mergedIntervals);
+            }
+            printDisplayMenu();
+            return;
+        }
+
+        if (lower.startsWith("display activity holidays ") || lower.startsWith("dah ")) {
+            String arg = lower.startsWith("dah ") ? lower.substring(4) : lower.substring(26);
+            arg.trim();
+            uint8_t s1 = 0, e1 = 0, s2 = 12, e2 = 12;
+            if (!parseDisplayActivityTimesCommand(arg, s1, e1, s2, e2)) {
+                Serial.println("Неверный формат. Используйте: dah HH-HH HH2-HH2");
+                Serial.println("Ограничение: первый интервал 0..12, второй 12..24 (например: dah 2-12 12-16)");
+            } else {
+                config.display_holiday_active_start_hour = s1;
+                config.display_holiday_active_end_hour = e1;
+                config.display_holiday_active_start_hour_2 = s2;
+                config.display_holiday_active_end_hour_2 = e2;
+                saveConfig();
+                char mergedIntervals[40] = {0};
+                formatDisplayActivityIntervals(config.display_holiday_active_start_hour,
+                                              config.display_holiday_active_end_hour,
+                                              config.display_holiday_active_start_hour_2,
+                                              config.display_holiday_active_end_hour_2,
+                                              mergedIntervals,
+                                              sizeof(mergedIntervals));
+                Serial.printf("Активность дисплея (выходные): %s\n", mergedIntervals);
             }
             printDisplayMenu();
             return;
@@ -412,3 +634,5 @@ void handleWifiMenu(String command) {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
 }
+
+#endif

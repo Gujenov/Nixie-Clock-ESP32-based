@@ -47,6 +47,80 @@ static const char* getNix6OutputModeLabelForInfo() {
 
 static bool configDefaultConfirmPending = false;
 
+static void formatDisplayActivityIntervals(uint8_t start1,
+                                           uint8_t end1,
+                                           uint8_t start2,
+                                           uint8_t end2,
+                                           char* out,
+                                           size_t outSize) {
+    if (!out || outSize == 0) {
+        return;
+    }
+
+    struct Interval {
+        uint8_t start;
+        uint8_t end;
+    };
+
+    Interval intervals[2] = {
+        {start1, end1},
+        {start2, end2}
+    };
+
+    Interval normalized[2];
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < 2; ++i) {
+        const uint8_t s = intervals[i].start;
+        const uint8_t e = intervals[i].end;
+        if (s > 24 || e > 24 || s == e) {
+            continue;
+        }
+        normalized[count++] = {s, e};
+    }
+
+    if (count == 0) {
+        strlcpy(out, "нет активных интервалов", outSize);
+        return;
+    }
+
+    if (count == 2 && normalized[1].start < normalized[0].start) {
+        const Interval tmp = normalized[0];
+        normalized[0] = normalized[1];
+        normalized[1] = tmp;
+    }
+
+    Interval merged[2];
+    uint8_t mergedCount = 0;
+    for (uint8_t i = 0; i < count; ++i) {
+        if (mergedCount == 0) {
+            merged[mergedCount++] = normalized[i];
+            continue;
+        }
+
+        Interval& last = merged[mergedCount - 1];
+        if (normalized[i].start <= last.end) {
+            if (normalized[i].end > last.end) {
+                last.end = normalized[i].end;
+            }
+        } else {
+            merged[mergedCount++] = normalized[i];
+        }
+    }
+
+    if (mergedCount == 1) {
+        snprintf(out, outSize, "%u-%u",
+                 static_cast<unsigned>(merged[0].start),
+                 static_cast<unsigned>(merged[0].end));
+        return;
+    }
+
+    snprintf(out, outSize, "%u-%u, %u-%u",
+             static_cast<unsigned>(merged[0].start),
+             static_cast<unsigned>(merged[0].end),
+             static_cast<unsigned>(merged[1].start),
+             static_cast<unsigned>(merged[1].end));
+}
+
 } // namespace
 
 // ======================= МЕНЮ ИНФОРМАЦИИ (уровень 2) =======================
@@ -215,12 +289,25 @@ void printConfigMenu() {
                   static_cast<unsigned>(config.chime_active_end_hour));
 
     if (isNixClockForUserMenu()) {
+        char displayIntervalsWorkdays[40] = {0};
+        char displayIntervalsHolidays[40] = {0};
+        formatDisplayActivityIntervals(config.display_active_start_hour,
+                                       config.display_active_end_hour,
+                                       config.display_active_start_hour_2,
+                                       config.display_active_end_hour_2,
+                                       displayIntervalsWorkdays,
+                                       sizeof(displayIntervalsWorkdays));
+        formatDisplayActivityIntervals(config.display_holiday_active_start_hour,
+                                       config.display_holiday_active_end_hour,
+                                       config.display_holiday_active_start_hour_2,
+                                       config.display_holiday_active_end_hour_2,
+                                       displayIntervalsHolidays,
+                                       sizeof(displayIntervalsHolidays));
         Serial.printf("  • Автояркость: %s\n", config.brightness_control_enabled ? "ВКЛЮЧЕНА" : "ОТКЛЮЧЕНА");
         Serial.printf("  • Порог max яркости: %u\n", static_cast<unsigned>(config.brightness_sensor_max));
         Serial.printf("  • Порог min яркости: %u\n", static_cast<unsigned>(config.brightness_sensor_min));
-        Serial.printf("  • Активность дисплея: %u-%u\n",
-                      static_cast<unsigned>(config.display_active_start_hour),
-                      static_cast<unsigned>(config.display_active_end_hour));
+        Serial.printf("  • Активность дисплея (будни): %s\n", displayIntervalsWorkdays);
+        Serial.printf("  • Активность дисплея (выходные): %s\n", displayIntervalsHolidays);
         Serial.printf("  • Фильтр датчика освещения: samples=%u, adc=%u-bit\n",
                       static_cast<unsigned>(config.light_filter_samples),
                       static_cast<unsigned>(config.light_sensor_resolution_bits));

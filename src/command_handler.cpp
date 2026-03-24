@@ -21,6 +21,8 @@ extern void runAntiPoisonNow();
 
 void handleCommand(String command) {
     command.trim();
+    String lowerCommand = command;
+    lowerCommand.toLowerCase();
 
     // Управление BLE-монитором (доступно всегда, даже внутри меню)
     if (command.equalsIgnoreCase("bon")) {
@@ -53,17 +55,17 @@ void handleCommand(String command) {
         ESP.restart();
         return;
     }
-    if (command.equalsIgnoreCase("ota on")) {
+    if (lowerCommand.startsWith("ota on")) {
         if (otaEnable()) {
             Serial.println("\n[OTA] Режим обновления активирован");
         }
         return;
     }
-    if (command.equalsIgnoreCase("ota off")) {
+    if (lowerCommand.startsWith("ota off")) {
         otaDisable();
         return;
     }
-    if (command.equalsIgnoreCase("ota status")) {
+    if (lowerCommand.startsWith("ota status")) {
         if (otaIsEnabled()) {
             Serial.printf("[OTA] ON, окно: %lu сек\n", static_cast<unsigned long>(otaSecondsLeft()));
         } else {
