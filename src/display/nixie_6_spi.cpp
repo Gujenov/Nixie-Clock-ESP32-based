@@ -1,5 +1,26 @@
 #include "display/nixie_6_spi.h"
 #include "config.h"
+#include <SPI.h>
+
+namespace {
+constexpr uint16_t DATA_SETUP_US = 1;
+constexpr uint16_t SCK_HIGH_US = 2;
+constexpr uint16_t LATCH_PULSE_US = 2;
+
+constexpr bool USE_HARDWARE_SPI = true;
+constexpr uint32_t DISPLAY_SPI_HZ = 500000;  // Экспериментально безопасная частота
+
+SPIClass g_displaySpi(HSPI);
+bool g_displaySpiReady = false;
+
+inline uint8_t reverseNibbleBits(uint8_t nibble) {
+    nibble &= 0x0F;
+    return static_cast<uint8_t>(((nibble & 0x1U) << 3) |
+                                ((nibble & 0x2U) << 1) |
+                                ((nibble & 0x4U) >> 1) |
+                                ((nibble & 0x8U) >> 3));
+}
+}
 
 Nixie6SpiDriver::Nixie6SpiDriver(uint8_t latchPin, uint8_t sckPin, uint8_t mosiPin)
     : latchPin_(latchPin), sckPin_(sckPin), mosiPin_(mosiPin) {}
@@ -12,6 +33,11 @@ void Nixie6SpiDriver::begin() {
     digitalWrite(latchPin_, LOW);
     digitalWrite(sckPin_, LOW);
     digitalWrite(mosiPin_, LOW);
+
+    if (USE_HARDWARE_SPI) {
+        g_displaySpi.begin(sckPin_, -1, mosiPin_, latchPin_);
+        g_displaySpiReady = true;
+    }
 
     pushFrame();
 }
@@ -363,7 +389,9 @@ Nixie6Frame Nixie6SpiDriver::applyOutputMode(const Nixie6Frame& frame) const {
 
 void Nixie6SpiDriver::writeBit(bool value) {
     digitalWrite(mosiPin_, value ? HIGH : LOW);
+    delayMicroseconds(DATA_SETUP_US);
     digitalWrite(sckPin_, HIGH);
+    delayMicroseconds(SCK_HIGH_US);
     digitalWrite(sckPin_, LOW);
 }
 
@@ -373,16 +401,48 @@ uint8_t Nixie6SpiDriver::statusFlagsWithSeparators() const {
 }
 
 void Nixie6SpiDriver::shiftOut32(uint32_t value) {
+    const bool reverseBitsInNibble =
+        (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6 &&
+         config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT);
+
+    if (USE_HARDWARE_SPI && g_displaySpiReady) {
+        // Порядок нибблов полностью повторяет текущий протокол bit-bang:
+        // n0..n5 (данные), затем n6..n7 (служебный байт).
+        // Сдвиги: 20,16,12,8,4,0,28,24
+        const int8_t nibbleShifts[8] = {20, 16, 12, 8, 4, 0, 28, 24};
+        uint8_t nibbles[8] = {0};
+        for (uint8_t i = 0; i < 8; ++i) {
+            uint8_t n = static_cast<uint8_t>((value >> nibbleShifts[i]) & 0x0FU);
+            if (reverseBitsInNibble) {
+                n = reverseNibbleBits(n);
+            }
+            nibbles[i] = n;
+        }
+
+        uint8_t tx[4] = {
+            static_cast<uint8_t>((nibbles[0] << 4) | nibbles[1]),
+            static_cast<uint8_t>((nibbles[2] << 4) | nibbles[3]),
+            static_cast<uint8_t>((nibbles[4] << 4) | nibbles[5]),
+            static_cast<uint8_t>((nibbles[6] << 4) | nibbles[7])
+        };
+
+        g_displaySpi.beginTransaction(SPISettings(DISPLAY_SPI_HZ, MSBFIRST, SPI_MODE0));
+        digitalWrite(latchPin_, LOW);
+        g_displaySpi.transfer(tx, sizeof(tx));
+        digitalWrite(mosiPin_, LOW);
+        digitalWrite(latchPin_, HIGH);
+        delayMicroseconds(LATCH_PULSE_US);
+        digitalWrite(latchPin_, LOW);
+        g_displaySpi.endTransaction();
+        return;
+    }
+
     // Протокол:
     // 1) DATA выставляется до фронта CLOCK
     // 2) CLOCK импульс для каждого бита (всего 32 бита)
     // 3) LATCH импульс
     digitalWrite(latchPin_, LOW);
     digitalWrite(sckPin_, LOW);
-
-    const bool reverseBitsInNibble =
-        (config.clock_type == CLOCK_TYPE_NIXIE && config.clock_digits == 6 &&
-         config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT);
 
     // Передаём сначала 24 бита данных (6 нибблов),
     // а служебный байт (startFlags, включая 0x03) — последним.
@@ -414,6 +474,8 @@ void Nixie6SpiDriver::shiftOut32(uint32_t value) {
 
     digitalWrite(mosiPin_, LOW);
 
+    // Импульс фиксации (LATCH) длительностью 2 мкс
     digitalWrite(latchPin_, HIGH);
+    delayMicroseconds(LATCH_PULSE_US);
     digitalWrite(latchPin_, LOW);
 }

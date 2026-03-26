@@ -152,7 +152,7 @@ static void serviceCathodesAntiPoisonProcedure(uint32_t nowMs) {
         antiPoisonState.pass++;
         if (antiPoisonState.pass >= 2) {
             antiPoisonState.active = false;
-            Serial.println("Kathodes anti-poison procedure run");
+            Serial.println("Kathodes anti-poison procedure ended");
         }
     }
 }
@@ -387,9 +387,9 @@ void loop() {
             sqwFailed = false;
             processSecondTick();
         }
-        else if (!sqwFailed && (currentMillis - lastSQWCheck >= 6000)) {
+        else if (!sqwFailed && (currentMillis - lastSQWCheck >= 5000)) {
             sqwFailed = true;
-            Serial.print("\n[WARN] SQW не поступает 6 сек, переход на millis!");
+            Serial.print("\n[WARN] SQW не поступает 5 сек, переход на millis!");
             requestTimeTickResync();
             lastSecondCheck = currentMillis;
             processSecondTick();

@@ -6,7 +6,6 @@
 
 #include <WiFi.h>
 #include <ArduinoOTA.h>
-#include <string.h>
 
 namespace {
 volatile bool g_otaBusy = false;
@@ -129,19 +128,9 @@ bool otaEnable(uint32_t windowMs) {
         return false;
     }
 
-    // Безопасно формируем hostname (на случай битого/не-terminated serial_number)
-    char serialSafe[sizeof(config.serial_number) + 1] = {0};
-    memcpy(serialSafe, config.serial_number, sizeof(config.serial_number));
-    serialSafe[sizeof(config.serial_number)] = '\0';
-    if (serialSafe[0] == '\0') {
-        strlcpy(serialSafe, "unknown", sizeof(serialSafe));
-    }
-
-    String host = String("nixie-") + serialSafe;
-    host.replace(" ", "-");
-
+    constexpr const char* kOtaHostname = "Clockio-OTA";
     constexpr uint16_t kOtaPort = 3232;
-    ArduinoOTA.setHostname(host.c_str());
+    ArduinoOTA.setHostname(kOtaHostname);
     ArduinoOTA.setPort(kOtaPort);
     ArduinoOTA.setPassword(OTA_PASSWORD);
     setupCallbacks();
@@ -152,7 +141,7 @@ bool otaEnable(uint32_t windowMs) {
     g_lastProgressMs = millis();
     g_lastProgressPercent = 0;
 
-    Serial.printf("\n[OTA] READY: %s IP: %s", host.c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("\n[OTA] READY: %s IP: %s", kOtaHostname, WiFi.localIP().toString().c_str());
     Serial.printf("\n[OTA] Port: %u", static_cast<unsigned>(kOtaPort));
     Serial.printf("\n[OTA] Password: %s", OTA_PASSWORD);
     Serial.printf("\n[OTA] Окно обновления: %lu сек", static_cast<unsigned long>(windowMs / 1000UL));

@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260324"
+#define FIRMWARE_VERSION "1.A0.3.260326"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -14,7 +14,7 @@
 
 // OTA (локальная сеть)
 // Пароль обязательно поменять перед production.
-#define OTA_PASSWORD "nixie-ota"
+#define OTA_PASSWORD "Gujenov-LAB-OTA"
 #define OTA_WINDOW_MS 300000UL   // 5 минут
 #define OTA_CONNECT_TIMEOUT_MS 12000UL
 
