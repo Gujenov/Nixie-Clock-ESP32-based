@@ -21,6 +21,18 @@ static DisplayManager displayManager;
 static bool displayEditMode = false;
 static TaskHandle_t g_displayRefreshTaskHandle = nullptr;
 
+static void onOtaTransferStartDisplayMarker() {
+    // Во время старта OTA принудительно показываем маркер на дисплее.
+    setDisplayOutputEnabled(true);
+    displayManager.showTime(12, 34, 56, true);
+
+    if (config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT) {
+        Serial.print("\n[DISP][OTA] 65:43:21 0x00");
+    } else {
+        Serial.print("\n[DISP][OTA] 12:34:56 0x00");
+    }
+}
+
 static void displayRefreshTask(void* param) {
     (void)param;
 
@@ -338,6 +350,7 @@ void setup() {
 
     // BLE включен по умолчанию (команды ble on/off остаются рабочими)
     bleTerminalEnable();
+    otaSetTransferStartCallback(onOtaTransferStartDisplayMarker);
     otaInit();
     
     initInputHandler();
@@ -397,9 +410,9 @@ void loop() {
     bleTerminalProcess();
     otaProcess();
 
-    // Во время OTA-окна приоритет — сетевой стек/обработчик OTA.
-    // Это снижает риск подвисаний после auth, до старта передачи данных.
-    if (otaIsEnabled()) {
+    // Во время активной OTA-передачи приоритет — сетевой стек/обработчик OTA.
+    // Само по себе открытое OTA-окно не должно останавливать индикацию времени.
+    if (otaIsBusy()) {
         delay(2);
         return;
     }

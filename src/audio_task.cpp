@@ -702,16 +702,43 @@ static void feedWavStreamChunk(WavStreamState& wav) {
         return;
     }
 
-    size_t bytesWritten = 0;
     const size_t bytesToWrite = static_cast<size_t>(frames) * 2 * sizeof(int16_t);
-    i2s_write(AUDIO_I2S_PORT, interleaved, bytesToWrite, &bytesWritten, pdMS_TO_TICKS(5));
+    size_t totalWritten = 0;
+    const uint8_t* outPtr = reinterpret_cast<const uint8_t*>(interleaved);
+    const unsigned long writeDeadline = millis() + 40UL;
 
-    const size_t consumedFrames = bytesWritten / (2 * sizeof(int16_t));
-    const size_t consumedBytes = consumedFrames * frameBytes;
+    while (totalWritten < bytesToWrite) {
+        size_t chunkWritten = 0;
+        i2s_write(AUDIO_I2S_PORT,
+                  outPtr + totalWritten,
+                  bytesToWrite - totalWritten,
+                  &chunkWritten,
+                  pdMS_TO_TICKS(5));
+
+        totalWritten += chunkWritten;
+
+        if (chunkWritten == 0) {
+            if (millis() >= writeDeadline) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
+
+    // ВАЖНО: из файла уже считан payloadBytes, поэтому счётчик оставшихся данных
+    // должен уменьшаться именно на объём прочитанного файла, а не на bytesWritten в I2S.
+    // Иначе при частичных i2s_write возникает ложный "interrupted before data chunk end".
+    const size_t consumedBytes = payloadBytes;
     if (consumedBytes >= wav.dataBytesRemaining) {
         wav.dataBytesRemaining = 0;
     } else {
         wav.dataBytesRemaining -= consumedBytes;
+    }
+
+    if (totalWritten < bytesToWrite) {
+        Serial.printf("\n[AUDIO] WARN: I2S partial write %lu/%lu bytes",
+                      static_cast<unsigned long>(totalWritten),
+                      static_cast<unsigned long>(bytesToWrite));
     }
 
     if (wav.dataBytesRemaining == 0) {

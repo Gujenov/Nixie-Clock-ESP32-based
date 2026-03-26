@@ -16,6 +16,7 @@ bool g_bleWasEnabledBeforeOta = false;
 bool g_otaDisableInProgress = false;
 unsigned long g_lastProgressMs = 0;
 unsigned int g_lastProgressPercent = 0;
+void (*g_otaTransferStartCallback)() = nullptr;
 
 bool connectWifiForOta() {
     if (WiFi.status() == WL_CONNECTED) {
@@ -74,6 +75,9 @@ void setupCallbacks() {
         g_lastProgressPercent = 0;
         const char* type = (ArduinoOTA.getCommand() == U_FLASH) ? "прошивка" : "файловая система";
         Serial.printf("\n[OTA] START: %s", type);
+        if (g_otaTransferStartCallback) {
+            g_otaTransferStartCallback();
+        }
     });
 
     ArduinoOTA.onEnd([]() {
@@ -100,6 +104,10 @@ void setupCallbacks() {
         if (error == OTA_END_ERROR) Serial.print(" end");
     });
 }
+}
+
+void otaSetTransferStartCallback(void (*callback)()) {
+    g_otaTransferStartCallback = callback;
 }
 
 void otaInit() {
