@@ -4,11 +4,11 @@
 
 namespace {
 constexpr uint16_t DATA_SETUP_US = 1;
-constexpr uint16_t SCK_HIGH_US = 2;
-constexpr uint16_t LATCH_PULSE_US = 2;
+constexpr uint16_t SCK_HIGH_US = 1;
+constexpr uint16_t LATCH_PULSE_US = 1;
 
 constexpr bool USE_HARDWARE_SPI = true;
-constexpr uint32_t DISPLAY_SPI_HZ = 500000;  // Экспериментально безопасная частота
+constexpr uint32_t DISPLAY_SPI_HZ = 15000000;  // 15 МГц
 
 SPIClass g_displaySpi(HSPI);
 bool g_displaySpiReady = false;

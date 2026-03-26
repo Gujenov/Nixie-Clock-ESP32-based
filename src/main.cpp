@@ -19,6 +19,43 @@ static bool sqwFailed = false;
 extern bool printEnabled;
 static DisplayManager displayManager;
 static bool displayEditMode = false;
+static TaskHandle_t g_displayRefreshTaskHandle = nullptr;
+
+static void displayRefreshTask(void* param) {
+    (void)param;
+
+    while (true) {
+        // OTA имеет высший приоритет: в этом режиме дисплей-задача уступает полностью.
+        if (otaIsEnabled()) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        // Агрессивное обновление нужно только во время WiFi/NTP sync,
+        // когда возможны лаги в обычном loop().
+        if (!isSyncInProgress()) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        if (!isDisplayOutputEnabled()) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        const time_t utcNow = getCurrentUTCTime();
+        const time_t localNow = utcToLocal(utcNow);
+        tm localTm{};
+        gmtime_r(&localNow, &localTm);
+
+        displayManager.updateFromLocalTime(localTm,
+                                           millis(),
+                                           config.alarm1.hour, config.alarm1.minute,
+                                           config.alarm2.hour, config.alarm2.minute);
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
 
 static const char* resetReasonText(esp_reset_reason_t reason) {
     switch (reason) {
@@ -307,6 +344,25 @@ void setup() {
     setButtonCallback(onButtonEvent);
     setAlarmButtonCallback(onAlarmButtonEvent);
     setEncoderCallback(onEncoderEvent);
+
+    if (g_displayRefreshTaskHandle == nullptr) {
+        BaseType_t taskOk = xTaskCreatePinnedToCore(
+            displayRefreshTask,
+            "disp_refresh",
+            4096,
+            nullptr,
+            2,
+            &g_displayRefreshTaskHandle,
+            1  // Ядро 1: рядом с loop(), но с более высоким приоритетом
+        );
+
+        if (taskOk == pdPASS) {
+            Serial.print("\n[DISP] Display refresh task started (core=1, prio=2)");
+        } else {
+            Serial.print("\n[DISP][WARN] Failed to start display refresh task");
+            g_displayRefreshTaskHandle = nullptr;
+        }
+    }
 
         printRuntimeStateSnapshot();
     
