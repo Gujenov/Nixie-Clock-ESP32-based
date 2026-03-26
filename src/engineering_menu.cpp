@@ -7,6 +7,7 @@
 #include "platform_profile.h"
 #include "audio_task.h"
 #include "runtime_counter.h"
+#include "display/nixie_6_spi.h"
 
 extern bool printEnabled;
 
@@ -116,6 +117,7 @@ static void printHardwareMenu() {
     Serial.println("7  <1/2/3>       - button / enc / enc+button");
     Serial.println("8  IR <1/0>      - Наличие датчика движения");
     Serial.println("9  Light sens cal- Калибровка датчика освещения");
+    Serial.println("10 disp fx on|off- эффект мягкой смены цифр (только NIXIE clock)");
     printEngineeringSubmenuNavigation();
     Serial.print("> ");
 }
@@ -382,6 +384,38 @@ static bool handleHardwareMenu(const String &command) {
 
     if (cmd.equals("9") || cmd.equals("light sens cal")) {
         Serial.println("\n[HW] Калибровка датчика освещения: -=В разработке=-");
+        Serial.print("> ");
+        return true;
+    }
+
+    if (cmd.equals("disp fx on") || cmd.equals("disp fx off") || cmd.startsWith("10 ")) {
+        bool parsed = false;
+        bool enable = false;
+
+        if (cmd.equals("disp fx on") || cmd.equals("10 on") || cmd.equals("10 disp fx on")) {
+            parsed = true;
+            enable = true;
+        } else if (cmd.equals("disp fx off") || cmd.equals("10 off") || cmd.equals("10 disp fx off")) {
+            parsed = true;
+            enable = false;
+        }
+
+        if (!parsed) {
+            Serial.println("\n[DISP][FX] Ошибка: используйте '10 disp fx on' или '10 disp fx off'");
+            Serial.print("> ");
+            return true;
+        }
+
+        const bool nixieClockType = (config.clock_type == CLOCK_TYPE_NIXIE ||
+                                     config.clock_type == CLOCK_TYPE_NIXIE_HAND);
+        if (enable && !nixieClockType) {
+            Serial.println("\n[DISP][FX] Включение заблокировано: опция доступна только для типа часов Nixie");
+            Serial.print("> ");
+            return true;
+        }
+
+        nixie6SetSoftTransitionEnabled(enable);
+        Serial.printf("\n[DISP][FX] %s\n", enable ? "ENABLED" : "DISABLED");
         Serial.print("> ");
         return true;
     }

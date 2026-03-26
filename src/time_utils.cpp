@@ -20,12 +20,36 @@ static char syncPass1[sizeof(config.wifi_pass)] = {0};
 static char syncSsid2[sizeof(config.wifi_ssid_2)] = {0};
 static char syncPass2[sizeof(config.wifi_pass_2)] = {0};
 
+static bool readDs3231Status(uint8_t& statusOut) {
+    Wire.beginTransmission(0x68);
+    Wire.write(0x0F);
+    if (Wire.endTransmission() != 0) {
+        return false;
+    }
+
+    Wire.requestFrom(0x68, 1);
+    if (!Wire.available()) {
+        return false;
+    }
+
+    statusOut = Wire.read();
+    return true;
+}
+
+static bool clearDs3231OsfFlag(uint8_t currentStatus) {
+    Wire.beginTransmission(0x68);
+    Wire.write(0x0F);
+    Wire.write(static_cast<uint8_t>(currentStatus & 0x7F));
+    return Wire.endTransmission() == 0;
+}
+
 // Основная функция проверки и инициализации источников времени
 // Вызывается при старте и потом при каждом получении времени
 void checkTimeSource() {
     static bool firstCheck = true;
     static bool firstRunMessage = true;
     static unsigned long lastProbeMillis = 0;
+    static bool osfRecoveryInProgress = false;
     
     if (firstCheck) {
         firstCheck = false;
@@ -56,28 +80,6 @@ void checkTimeSource() {
         }
     }
 
-    // Проверка OSF (только если DS3231 доступен)
-    if (ds3231_now_available) {
-        Wire.beginTransmission(0x68);
-        Wire.write(0x0F);
-        if (Wire.endTransmission() == 0) {
-            Wire.requestFrom(0x68, 1);
-            if (Wire.available()) {
-                uint8_t status = Wire.read();
-                if (status & 0x80) {
-                    Serial.print("\n[DS3231] ⚠️ Флаг OSF установлен (питание пропадало)");
-                    Wire.beginTransmission(0x68);
-                    Wire.write(0x0F);
-                    Wire.write(status & 0x7F);
-                    Wire.endTransmission();
-                    setDefaultTimeToAllSources(); // Устанавливаем время по умолчанию
-                    Serial.print("\nПопытка синхронизировать время с NTP...");
-                    syncTimeAsync(); // Пробуем синхронизировать время
-                }
-            }
-        }
-    }
-    
     bool showConnectionMessage = false;
     time_t diff = 0;
 
@@ -90,8 +92,8 @@ void checkTimeSource() {
 
             Serial.print("\n[DS3231] Инициализирован");
             
-            // Получаем время от DS3231
-            time_t currentTime = getCurrentUTCTime();
+            // Получаем время от DS3231 (без рекурсивного checkTimeSource())
+            time_t currentTime = convertDateTimeToTimeT(rtc->now());
             
             if (currentTime > 0) {  // Проверяем, что время корректно
                 // Сравниваем с системным временем
@@ -124,7 +126,7 @@ void checkTimeSource() {
             currentTimeSource = EXTERNAL_DS3231;
             
             if (rtc) {
-                time_t currentTime = getCurrentUTCTime();
+                time_t currentTime = convertDateTimeToTimeT(rtc->now());
                 
                 if (currentTime == 0) {
                     Serial.print("\n[DS3231] Повторное подключение: время некорректно");
@@ -148,6 +150,35 @@ void checkTimeSource() {
         setupInterrupts();
     }
 
+    // Проверка OSF после инициализации DS3231 объекта (одно событие -> одно восстановление).
+    if (ds3231_now_available && ds3231_available && rtc) {
+        uint8_t status = 0;
+        if (readDs3231Status(status)) {
+            const bool osfSet = (status & 0x80U) != 0;
+            if (osfSet) {
+                if (!osfRecoveryInProgress) {
+                    Serial.print("\n[DS3231] ⚠️ Флаг OSF установлен (питание пропадало)");
+
+                    if (!clearDs3231OsfFlag(status)) {
+                        Serial.print("\n[DS3231] ⚠️ Не удалось сбросить флаг OSF");
+                    }
+
+                    // Ставим безопасное время сразу в оба источника (RTC + DS3231).
+                    setDefaultTimeToAllSources();
+
+                    // Восстановление после OSF должно выполняться независимо от auto_sync_enabled.
+                    Serial.print("\nПопытка синхронизировать время с NTP...");
+                    syncTimeAsync(true);
+
+                    osfRecoveryInProgress = true;
+                }
+            } else if (osfRecoveryInProgress) {
+                // Флаг очищен и новое событие OSF не активно — разрешаем будущие recovery-сценарии.
+                osfRecoveryInProgress = false;
+            }
+        }
+    }
+
     // Выводим сообщение о подключении (если нужно)
     if (showConnectionMessage && ds3231_available) {
         if (diff > 5) {
@@ -160,8 +191,14 @@ void checkTimeSource() {
 }
 
 time_t getCurrentUTCTime() {
-    // Всегда проверяем актуальность источника
-    checkTimeSource();
+    // Всегда проверяем актуальность источника, но не допускаем рекурсии
+    // (checkTimeSource() местами читает время RTC напрямую).
+    static bool checkInProgress = false;
+    if (!checkInProgress) {
+        checkInProgress = true;
+        checkTimeSource();
+        checkInProgress = false;
+    }
     
     if (currentTimeSource == EXTERNAL_DS3231 && rtc && ds3231_available) {
         // ТОЛЬКО чтение, БЕЗ обновления системного времени

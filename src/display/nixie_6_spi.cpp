@@ -6,9 +6,41 @@ namespace {
 constexpr uint16_t DATA_SETUP_US = 1;
 constexpr uint16_t SCK_HIGH_US = 1;
 constexpr uint16_t LATCH_PULSE_US = 1;
+constexpr uint16_t TRANSITION_SLOT_US = 500;  // 2 кГц мигания при смешивании кадров
+constexpr uint8_t TRANSITION_SLOTS = 10;
+
+// Назначение битов служебного байта (MSB -> LSB):
+// b7: Reserve
+// b6: AM/PM indicator (12-hour mode)
+// b5: Load 1 enable
+// b4: Load 2 enable
+// b3: Alarm 1 indicator
+// b2: Alarm 2 indicator
+// b1: Separator between HH and MM
+// b0: Separator between MM and SS
+constexpr uint8_t STATUS_BIT_RESERVED = 0x80;
+constexpr uint8_t STATUS_BIT_AM_PM = 0x40;
+constexpr uint8_t STATUS_BIT_LOAD1 = 0x20;
+constexpr uint8_t STATUS_BIT_LOAD2 = 0x10;
+constexpr uint8_t STATUS_BIT_ALARM1 = 0x08;
+constexpr uint8_t STATUS_BIT_ALARM2 = 0x04;
+constexpr uint8_t STATUS_BIT_SEP_HM = 0x02;
+constexpr uint8_t STATUS_BIT_SEP_MS = 0x01;
+constexpr uint8_t STATUS_ALL_DEFINED_BITS =
+    static_cast<uint8_t>(STATUS_BIT_RESERVED |
+                         STATUS_BIT_AM_PM |
+                         STATUS_BIT_LOAD1 |
+                         STATUS_BIT_LOAD2 |
+                         STATUS_BIT_ALARM1 |
+                         STATUS_BIT_ALARM2 |
+                         STATUS_BIT_SEP_HM |
+                         STATUS_BIT_SEP_MS);
 
 constexpr bool USE_HARDWARE_SPI = true;
 constexpr uint32_t DISPLAY_SPI_HZ = 15000000;  // 15 МГц
+
+bool g_softTransitionEnabled = true;
+uint16_t g_transitionDurationMs = 150;
 
 SPIClass g_displaySpi(HSPI);
 bool g_displaySpiReady = false;
@@ -24,6 +56,24 @@ inline uint8_t reverseNibbleBits(uint8_t nibble) {
 
 Nixie6SpiDriver::Nixie6SpiDriver(uint8_t latchPin, uint8_t sckPin, uint8_t mosiPin)
     : latchPin_(latchPin), sckPin_(sckPin), mosiPin_(mosiPin) {}
+
+void nixie6SetSoftTransitionEnabled(bool enabled) {
+    g_softTransitionEnabled = enabled;
+}
+
+bool nixie6IsSoftTransitionEnabled() {
+    return g_softTransitionEnabled;
+}
+
+void nixie6SetTransitionDurationMs(uint16_t durationMs) {
+    if (durationMs < 40) durationMs = 40;
+    if (durationMs > 500) durationMs = 500;
+    g_transitionDurationMs = durationMs;
+}
+
+uint16_t nixie6GetTransitionDurationMs() {
+    return g_transitionDurationMs;
+}
 
 void Nixie6SpiDriver::begin() {
     pinMode(latchPin_, OUTPUT);
@@ -75,6 +125,7 @@ void Nixie6SpiDriver::testPattern() {
 
 void Nixie6SpiDriver::showUniformDigits(uint8_t digit) {
     if (digit > 9) digit = 9;
+    transitionActive_ = false;  // антиотравление/ручные шаблоны — без soft-transition
     const Nixie6Frame f = applyOutputMode(buildUniformFrame(digit));
     shiftOut32(f.pack());
 }
@@ -186,6 +237,8 @@ void Nixie6SpiDriver::setTemperatureC(int16_t temperature) {
 }
 
 void Nixie6SpiDriver::updateFromLocalTime(const tm& localTm) {
+    const tm previousTm = localTm_;
+    maybeStartTimeTransition(previousTm, localTm, millis());
     localTm_ = localTm;
 }
 
@@ -242,8 +295,33 @@ uint32_t Nixie6SpiDriver::packedFrameOutput() const {
 }
 
 void Nixie6SpiDriver::pushFrame() {
-    // На шину уходит уже аппаратно-преобразованный кадр согласно режиму Nix6
-    shiftOut32(packedFrameOutput());
+    // На шину уходит кадр c учетом активной анимации soft-transition (если есть).
+    if (transitionActive_ && (millis() - transitionStartMs_) >= transitionDurationMs_) {
+        transitionActive_ = false;
+    }
+    const Nixie6Frame out = frameForOutputNow(millis());
+    shiftOut32(out.pack());
+}
+
+void Nixie6SpiDriver::serviceTransition(uint32_t nowMs) {
+    if (!transitionActive_) {
+        return;
+    }
+    if ((nowMs - transitionStartMs_) >= transitionDurationMs_) {
+        transitionActive_ = false;
+        shiftOut32(transitionTo_.pack());
+        return;
+    }
+    const Nixie6Frame out = frameForOutputNow(nowMs);
+    shiftOut32(out.pack());
+}
+
+void Nixie6SpiDriver::cancelTransition() {
+    transitionActive_ = false;
+}
+
+bool Nixie6SpiDriver::isTransitionActive() const {
+    return transitionActive_;
 }
 
 uint8_t Nixie6SpiDriver::tens(uint8_t value) {
@@ -255,13 +333,17 @@ uint8_t Nixie6SpiDriver::ones(uint8_t value) {
 }
 
 Nixie6Frame Nixie6SpiDriver::buildTimeFrame() const {
-    Nixie6Frame f;
-    // Для режима времени: DATA фиксировано 0x03
-    f.startFlags = 0x03;
+    return buildTimeFrameFromTm(localTm_);
+}
 
-    const uint8_t hour = static_cast<uint8_t>((localTm_.tm_hour < 0) ? 0 : localTm_.tm_hour % 24);
-    const uint8_t minute = static_cast<uint8_t>((localTm_.tm_min < 0) ? 0 : localTm_.tm_min % 60);
-    const uint8_t second = static_cast<uint8_t>((localTm_.tm_sec < 0) ? 0 : localTm_.tm_sec % 60);
+Nixie6Frame Nixie6SpiDriver::buildTimeFrameFromTm(const tm& sourceTm) const {
+    Nixie6Frame f;
+    // Для режима времени по умолчанию оба разделителя включены.
+    f.startFlags = statusFlagsWithSeparators(true, true);
+
+    const uint8_t hour = static_cast<uint8_t>((sourceTm.tm_hour < 0) ? 0 : sourceTm.tm_hour % 24);
+    const uint8_t minute = static_cast<uint8_t>((sourceTm.tm_min < 0) ? 0 : sourceTm.tm_min % 60);
+    const uint8_t second = static_cast<uint8_t>((sourceTm.tm_sec < 0) ? 0 : sourceTm.tm_sec % 60);
 
     // Стандартный порядок (режим 1):
     // ЧАС-МИН-СЕК + служебный байт (0x03)
@@ -303,14 +385,17 @@ Nixie6Frame Nixie6SpiDriver::buildDateFrame() const {
 
 Nixie6Frame Nixie6SpiDriver::buildAlarmFrame(uint8_t hour, uint8_t minute) const {
     Nixie6Frame f;
-    f.startFlags = statusFlagsWithSeparators();
+    // Для режима будильника гасим разделитель MM:SS (b0=0), оставляем HH:MM (b1=1).
+    f.startFlags = statusFlagsWithSeparators(true, false);
 
     f.nibbles[0] = tens(hour);
     f.nibbles[1] = ones(hour);
     f.nibbles[2] = tens(minute);
     f.nibbles[3] = ones(minute);
-    f.nibbles[4] = 0;
-    f.nibbles[5] = 0;
+    // Хвостовые два ниббла = 0xFF (проверка гашения индикаторов).
+    // В режиме reverse/invert это окажется в первых двух нибблах после applyOutputMode().
+    f.nibbles[4] = 0x0F;
+    f.nibbles[5] = 0x0F;
     return f;
 }
 
@@ -387,6 +472,56 @@ Nixie6Frame Nixie6SpiDriver::applyOutputMode(const Nixie6Frame& frame) const {
     return out;
 }
 
+void Nixie6SpiDriver::maybeStartTimeTransition(const tm& previousTm, const tm& newTm, uint32_t nowMs) {
+    softTransitionEnabled_ = g_softTransitionEnabled;
+    transitionDurationMs_ = g_transitionDurationMs;
+
+    if (!softTransitionEnabled_) {
+        transitionActive_ = false;
+        return;
+    }
+
+    // Эффект только для обычного режима времени, без веток/редактирования.
+    if (editPlaceholder_ || secondaryBranchActive_ || mainMode_ != MainMode::Time) {
+        transitionActive_ = false;
+        return;
+    }
+
+    const Nixie6Frame prevOut = applyOutputMode(buildTimeFrameFromTm(previousTm));
+    const Nixie6Frame nextOut = applyOutputMode(buildTimeFrameFromTm(newTm));
+
+    if (prevOut.pack() == nextOut.pack()) {
+        transitionActive_ = false;
+        return;
+    }
+
+    transitionFrom_ = prevOut;
+    transitionTo_ = nextOut;
+    transitionStartMs_ = nowMs;
+    transitionActive_ = true;
+}
+
+Nixie6Frame Nixie6SpiDriver::frameForOutputNow(uint32_t nowMs) const {
+    if (!transitionActive_) {
+        return applyOutputMode(currentFrame());
+    }
+
+    const uint32_t elapsed = nowMs - transitionStartMs_;
+    if (elapsed >= transitionDurationMs_) {
+        // const-функция: возврат конечного кадра; сброс флага выполняется в push/service ниже
+        return transitionTo_;
+    }
+
+    // Линейный рост доли нового кадра: 1/10 -> 10/10 за transitionDurationMs.
+    uint8_t newSlots = static_cast<uint8_t>(1 + (elapsed * (TRANSITION_SLOTS - 1)) / transitionDurationMs_);
+    if (newSlots > TRANSITION_SLOTS) {
+        newSlots = TRANSITION_SLOTS;
+    }
+
+    const uint32_t slot = (micros() / TRANSITION_SLOT_US) % TRANSITION_SLOTS;
+    return (slot < newSlots) ? transitionTo_ : transitionFrom_;
+}
+
 void Nixie6SpiDriver::writeBit(bool value) {
     digitalWrite(mosiPin_, value ? HIGH : LOW);
     delayMicroseconds(DATA_SETUP_US);
@@ -395,9 +530,23 @@ void Nixie6SpiDriver::writeBit(bool value) {
     digitalWrite(sckPin_, LOW);
 }
 
-uint8_t Nixie6SpiDriver::statusFlagsWithSeparators() const {
-    // Младшие 2 бита всегда 1: оба разделителя включены
-    return static_cast<uint8_t>(startFlags_ | 0x03);
+uint8_t Nixie6SpiDriver::statusFlagsWithSeparators(bool showHmSeparator,
+                                                   bool showMsSeparator) const {
+    uint8_t flags = static_cast<uint8_t>(startFlags_ & STATUS_ALL_DEFINED_BITS);
+
+    if (showHmSeparator) {
+        flags = static_cast<uint8_t>(flags | STATUS_BIT_SEP_HM);
+    } else {
+        flags = static_cast<uint8_t>(flags & ~STATUS_BIT_SEP_HM);
+    }
+
+    if (showMsSeparator) {
+        flags = static_cast<uint8_t>(flags | STATUS_BIT_SEP_MS);
+    } else {
+        flags = static_cast<uint8_t>(flags & ~STATUS_BIT_SEP_MS);
+    }
+
+    return flags;
 }
 
 void Nixie6SpiDriver::shiftOut32(uint32_t value) {

@@ -72,6 +72,11 @@ public:
     // Вывод кадра в 74HC595
     void pushFrame();
 
+    // Неблокирующая анимация перехода времени (старый кадр -> новый кадр)
+    void serviceTransition(uint32_t nowMs);
+    void cancelTransition();
+    bool isTransitionActive() const;
+
 private:
     enum class MainMode : uint8_t { Time = 0, Date, Alarm1, Alarm2 };
     enum class AuxMode : uint8_t { Pressure = 0, Humidity, Temperature };
@@ -112,9 +117,27 @@ private:
     Nixie6Frame buildPressureFrame() const;
     Nixie6Frame buildHumidityFrame() const;
     Nixie6Frame buildTemperatureFrame() const;
+    Nixie6Frame buildTimeFrameFromTm(const tm& sourceTm) const;
     Nixie6Frame applyOutputMode(const Nixie6Frame& frame) const;
-    uint8_t statusFlagsWithSeparators() const;
+    uint8_t statusFlagsWithSeparators(bool showHmSeparator = true,
+                                      bool showMsSeparator = true) const;
+
+    void maybeStartTimeTransition(const tm& previousTm, const tm& newTm, uint32_t nowMs);
+    Nixie6Frame frameForOutputNow(uint32_t nowMs) const;
 
     void writeBit(bool value);
     void shiftOut32(uint32_t value);
+
+    bool softTransitionEnabled_ = true;
+    bool transitionActive_ = false;
+    uint32_t transitionStartMs_ = 0;
+    uint16_t transitionDurationMs_ = 150;
+    Nixie6Frame transitionFrom_{};
+    Nixie6Frame transitionTo_{};
 };
+
+// Глобальные runtime-настройки soft-transition для Nixie6.
+void nixie6SetSoftTransitionEnabled(bool enabled);
+bool nixie6IsSoftTransitionEnabled();
+void nixie6SetTransitionDurationMs(uint16_t durationMs);
+uint16_t nixie6GetTransitionDurationMs();

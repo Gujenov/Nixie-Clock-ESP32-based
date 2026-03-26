@@ -52,6 +52,19 @@ public:
                              uint8_t alarm1Hour, uint8_t alarm1Minute,
                              uint8_t alarm2Hour, uint8_t alarm2Minute);
 
+    // Фоновое обслуживание неблокирующих анимаций отображения (soft-transition).
+    void serviceAnimations(uint32_t nowMs);
+    void stopAnimations();
+    bool hasActiveAnimation() const;
+
+    // Возможности активного backend'а
+    bool isNixieClockType() const;
+    bool supportsSoftTransition() const;
+    bool supportsAntiPoison() const;
+
+    // OTA-маркер старта передачи (актуально только для Nixie6)
+    void showOtaTransferStartMarker();
+
     // Политика активности/гашения дисплея (расписание + временная ручная активация)
     bool isDisplayActiveBySchedule(const tm& localTm) const;
     bool isDisplayActiveNow(const tm& localTm);

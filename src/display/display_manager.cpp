@@ -345,6 +345,64 @@ void DisplayManager::updateFromLocalTime(const tm& localTm, uint32_t nowMs,
     (void)alarm2Minute;
 }
 
+void DisplayManager::serviceAnimations(uint32_t nowMs) {
+    if (!driver_ || !isNixie6_) {
+        return;
+    }
+
+    auto* d = static_cast<Nixie6SpiDriver*>(driver_);
+    d->serviceTransition(nowMs);
+}
+
+void DisplayManager::stopAnimations() {
+    if (!driver_ || !isNixie6_) {
+        return;
+    }
+
+    auto* d = static_cast<Nixie6SpiDriver*>(driver_);
+    d->cancelTransition();
+}
+
+bool DisplayManager::hasActiveAnimation() const {
+    if (!driver_ || !isNixie6_) {
+        return false;
+    }
+
+    const auto* d = static_cast<const Nixie6SpiDriver*>(driver_);
+    return d->isTransitionActive();
+}
+
+bool DisplayManager::isNixieClockType() const {
+    return (activeBackend_ == ActiveBackend::Nixie6 ||
+            activeBackend_ == ActiveBackend::NixieGeneric ||
+            activeBackend_ == ActiveBackend::NixieHand);
+}
+
+bool DisplayManager::supportsSoftTransition() const {
+    // Soft-transition реализован только в Nixie6 backend.
+    return isNixie6_;
+}
+
+bool DisplayManager::supportsAntiPoison() const {
+    // Антиотравление имеет смысл только для Nixie-индикаторов.
+    return isNixieClockType();
+}
+
+void DisplayManager::showOtaTransferStartMarker() {
+    if (!isNixie6_ || !driver_) {
+        return;
+    }
+
+    // Во время старта OTA принудительно показываем маркер на дисплее.
+    showTime(12, 34, 56, true);
+
+    if (config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT) {
+        Serial.print("\n[DISP][OTA] 65:43:21 0x00");
+    } else {
+        Serial.print("\n[DISP][OTA] 12:34:56 0x00");
+    }
+}
+
 bool DisplayManager::shouldUpdateOnSecond(uint8_t second) const {
     switch (tickMode_) {
         case DisplayTickMode::EverySecond:

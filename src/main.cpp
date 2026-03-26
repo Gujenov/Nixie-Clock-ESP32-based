@@ -14,6 +14,7 @@
 #include "platform_profile.h"
 #include "runtime_counter.h"
 #include <esp_system.h>
+#include <cstring>
 
 static bool sqwFailed = false;
 extern bool printEnabled;
@@ -21,51 +22,66 @@ static DisplayManager displayManager;
 static bool displayEditMode = false;
 static TaskHandle_t g_displayRefreshTaskHandle = nullptr;
 
-static void onOtaTransferStartDisplayMarker() {
-    // Во время старта OTA принудительно показываем маркер на дисплее.
-    setDisplayOutputEnabled(true);
-    displayManager.showTime(12, 34, 56, true);
+static bool isAntiPoisonActive();
+static bool isDisplayShowingTimeView();
 
-    if (config.nix6_output_mode == NIX6_OUTPUT_REVERSE_INVERT) {
-        Serial.print("\n[DISP][OTA] 65:43:21 0x00");
-    } else {
-        Serial.print("\n[DISP][OTA] 12:34:56 0x00");
+static void onOtaTransferStartDisplayMarker() {
+    if (!displayManager.supportsSoftTransition()) {
+        return;
     }
+
+    setDisplayOutputEnabled(true);
+    displayManager.showOtaTransferStartMarker();
 }
 
 static void displayRefreshTask(void* param) {
     (void)param;
 
     while (true) {
-        // OTA имеет высший приоритет: в этом режиме дисплей-задача уступает полностью.
-        if (otaIsEnabled()) {
+        // OTA-передача имеет высший приоритет.
+        if (otaIsBusy()) {
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
 
-        // Агрессивное обновление нужно только во время WiFi/NTP sync,
-        // когда возможны лаги в обычном loop().
-        if (!isSyncInProgress()) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
+        const uint32_t nowMs = millis();
+
+        // 1) Высокочастотное обслуживание анимации soft-transition
+        // только пока реально показывается время.
+        const bool allowSoftTransitionNow = displayManager.supportsSoftTransition() &&
+                            isDisplayOutputEnabled() &&
+                                            isDisplayShowingTimeView() &&
+                                            !isAntiPoisonActive();
+        if (allowSoftTransitionNow) {
+            displayManager.serviceAnimations(nowMs);
+        } else {
+            // Жёстко гасим остатки анимации вне режима отображения времени.
+            displayManager.stopAnimations();
         }
 
-        if (!isDisplayOutputEnabled()) {
+        // 2) Во время sync подстраховываем периодический апдейт времени,
+        // чтобы индикация не "подвисала" из-за сетевой активности.
+        if (isSyncInProgress() && isDisplayOutputEnabled()) {
+            const time_t utcNow = getCurrentUTCTime();
+            const time_t localNow = utcToLocal(utcNow);
+            tm localTm{};
+            gmtime_r(&localNow, &localTm);
+
+            displayManager.updateFromLocalTime(localTm,
+                                               nowMs,
+                                               config.alarm1.hour, config.alarm1.minute,
+                                               config.alarm2.hour, config.alarm2.minute);
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
 
-        const time_t utcNow = getCurrentUTCTime();
-        const time_t localNow = utcToLocal(utcNow);
-        tm localTm{};
-        gmtime_r(&localNow, &localTm);
-
-        displayManager.updateFromLocalTime(localTm,
-                                           millis(),
-                                           config.alarm1.hour, config.alarm1.minute,
-                                           config.alarm2.hour, config.alarm2.minute);
-
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // 3) В обычном режиме: если есть активная анимация — держим >=1кГц сервис,
+        // иначе спим дольше для экономии CPU.
+        if (displayManager.hasActiveAnimation()) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
     }
 }
 
@@ -94,6 +110,28 @@ struct AntiPoisonState {
 };
 
 static AntiPoisonState antiPoisonState;
+
+static bool isDisplayShowingTimeView() {
+    if (!displayManager.supportsAntiPoison() && !displayManager.supportsSoftTransition()) {
+        return false;
+    }
+    return strcmp(displayManager.activeViewName(), "time") == 0;
+}
+
+static void stopCathodesAntiPoisonProcedure(const char* reason = nullptr) {
+    if (!antiPoisonState.active) {
+        return;
+    }
+
+    antiPoisonState.active = false;
+    antiPoisonState.pass = 0;
+    antiPoisonState.digit = 1;
+    antiPoisonState.nextStepMs = 0;
+
+    if (reason && reason[0] != '\0') {
+        Serial.printf("[ANTIPOISON] Остановлено: %s\n", reason);
+    }
+}
 
 static void triggerDisplaySleepOverrideIfNeeded() {
     const time_t utcNow = getCurrentUTCTime();
@@ -206,12 +244,8 @@ static void serviceCathodesAntiPoisonProcedure(uint32_t nowMs) {
     }
 }
 
-static bool isNixieCathodeDisplay() {
-    return (config.clock_type == CLOCK_TYPE_NIXIE || config.clock_type == CLOCK_TYPE_NIXIE_HAND);
-}
-
 void runAntiPoisonNow() {
-    if (!isNixieCathodeDisplay()) {
+    if (!displayManager.supportsAntiPoison()) {
         Serial.println("[ANTIPOISON] Пропущено: режим не Nixie");
         return;
     }
@@ -432,7 +466,13 @@ void loop() {
         processAllInputs();
     }
 
-    serviceCathodesAntiPoisonProcedure(currentMillis);
+    if (displayManager.supportsAntiPoison() && !isDisplayShowingTimeView() && isAntiPoisonActive()) {
+        stopCathodesAntiPoisonProcedure("активен не-time экран");
+    }
+
+    if (displayManager.supportsAntiPoison() && isDisplayShowingTimeView()) {
+        serviceCathodesAntiPoisonProcedure(currentMillis);
+    }
     chimeSchedulerService();
  
     // === ОБРАБОТКА СЕКУНДНЫХ СОБЫТИЙ ===
@@ -533,12 +573,18 @@ void processSecondTick() {
         Serial.println("\n[DISP] Ручная активация сброшена: наступил штатный интервал активности");
     }
 
+    const bool displayShowsTimeNow = isDisplayShowingTimeView();
     const int32_t hourMarker = (local_tm_info.tm_yday * 24) + local_tm_info.tm_hour;
-    const bool shouldRunAntiPoison = isNixieCathodeDisplay() &&
+    const bool shouldRunAntiPoison = displayManager.supportsAntiPoison() &&
                                      displayActiveNow &&
+                                     displayShowsTimeNow &&
                                      local_tm_info.tm_min == 0 &&
                                      local_tm_info.tm_sec == 1 &&
                                      hourMarker != lastAntiPoisonHourMarker;
+
+    if (!displayShowsTimeNow && isAntiPoisonActive()) {
+        stopCathodesAntiPoisonProcedure("антиотравление разрешено только в time view");
+    }
 
     if (shouldRunAntiPoison) {
         if (startCathodesAntiPoisonProcedure()) {

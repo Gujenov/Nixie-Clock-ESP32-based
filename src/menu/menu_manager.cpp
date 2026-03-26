@@ -377,7 +377,7 @@ static uint8_t parseDaysMask(const String &input) {
     s.trim();
     s.toLowerCase();
 
-    if (s == "weekdays" || s == "wd") return 0x1F; // Пн-Пт
+    if (s == "workdays" || s == "wd") return 0x1F; // Пн-Пт
     if (s == "weekends" || s == "we") return 0x60; // Сб-Вс
     if (s == "all") return 0x7F;
 
@@ -415,12 +415,14 @@ static bool isDaysKeyword(const String &input) {
     String s = input;
     s.trim();
     s.toLowerCase();
-    return (s == "weekdays" || s == "weekends" || s == "all" || s == "wd" || s == "we");
+    return (s == "workdays" || s == "weekends" || s == "all" || s == "wd" || s == "we");
 }
 
 void printAlarmMenu() {
     Serial.println("\n=== УПРАВЛЕНИЕ БУДИЛЬНИКАМИ ===");
     printAlarmStatus();
+
+    Serial.println("\n  ref / refresh - Обновление информации о будильниках\n");
 
     Serial.println("\n  set al 1 [HH:MM] / sal1 [HH:MM] - время будильника 1");
     Serial.println("  al 1 sound [num] / a1s [num] - номер мелодии для будильника 1");
@@ -429,7 +431,7 @@ void printAlarmMenu() {
     Serial.println("\n  set al 2 [HH:MM] / sal2 [HH:MM] - время будильника 2");
     Serial.println("  al 2 sound [num] / a2s [num] - номер мелодии для будильника 2");
     Serial.println("  al 2 days [1,2,3...7] / a2d [1,2,3...7] - срабатывание буд. 2, начиная с Пн=1 по Вс=7");
-    Serial.println("  al 2 list [weekdays|weekends|all] / a2l [...] - набор дней будильника 2 (по будням, выходным, все)");
+    Serial.println("  al 2 list [workdays|weekends|all] / a2l [...] - набор дней будильника 2 (по будням, выходным, все)");
     Serial.println("  dis al 2 / da2 - отключить будильник 2");
 
     printMappingMenuCommands();
@@ -443,7 +445,8 @@ void handleAlarmMenu(String command) {
     }
 
     if (handleCommonMenuCommands(command, printAlarmMenu)) return;
-    else if (command.equalsIgnoreCase("al") || command.equals("status")) {
+    else if (command.equalsIgnoreCase("al") || command.equals("status") ||
+             command.equalsIgnoreCase("ref") || command.equalsIgnoreCase("refresh")) {
         printAlarmStatus();
     }
     else if (command.startsWith("sal1") || command.startsWith("sal2")) {
@@ -505,9 +508,9 @@ void handleAlarmMenu(String command) {
         String daysStr = command.substring(3);
         daysStr.trim();
         if (daysStr.length() == 0) {
-            Serial.println("Нужно указать: weekdays, weekends или all");
+            Serial.println("Нужно указать: workdays, weekends или all");
         } else if (!isDaysKeyword(daysStr) && !containsDayDigits(daysStr)) {
-            Serial.println("Неверный формат. Используйте weekdays/weekends/all или список 1-7");
+            Serial.println("Неверный формат. Используйте workdays/weekends/all или список 1-7");
         } else {
             uint8_t mask = parseDaysMask(daysStr);
             if (mask == 0) {
@@ -621,9 +624,9 @@ void handleAlarmMenu(String command) {
                 if (alarmNum != 2) {
                     Serial.println("Дни недели доступны только для будильника 2");
                 } else if (daysStr.length() == 0) {
-                    Serial.println("Нужно указать: weekdays, weekends или all");
+                    Serial.println("Нужно указать: workdays, weekends или all");
                 } else if (!isDaysKeyword(daysStr) && !containsDayDigits(daysStr)) {
-                    Serial.println("Неверный формат. Используйте weekdays/weekends/all или список 1-7");
+                    Serial.println("Неверный формат. Используйте workdays/weekends/all или список 1-7");
                 } else {
                     uint8_t mask = parseDaysMask(daysStr);
                     if (mask == 0) {
@@ -650,8 +653,6 @@ void handleAlarmMenu(String command) {
     else {
         Serial.println("Неизвестная команда. Введите 'help' для справки");
     }
-
-    printAlarmMenu();
 }
 
 // Реализации меню "Звук и дисплей" и "Wi‑Fi/NTP" вынесены в menu_display_wifi.cpp
