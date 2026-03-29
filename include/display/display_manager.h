@@ -61,6 +61,13 @@ public:
     bool isNixieClockType() const;
     bool supportsSoftTransition() const;
     bool supportsAntiPoison() const;
+    bool isTimeViewActive() const;
+
+    // Унифицированный runtime anti-poison (для неподдерживаемых backend'ов — no-op)
+    bool isAntiPoisonActive() const;
+    bool startAntiPoison();
+    void stopAntiPoison();
+    void serviceAntiPoison(uint32_t nowMs);
 
     // OTA-маркер старта передачи (актуально только для Nixie6)
     void showOtaTransferStartMarker();
@@ -117,6 +124,13 @@ private:
     bool debugAvailable_ = false;
 
     bool sleepOverrideUntilSchedule_ = false;
+
+    struct AntiPoisonRuntimeState {
+        bool active = false;
+        uint8_t pass = 0;
+        uint8_t digit = 1;
+        uint32_t nextStepMs = 0;
+    } antiPoisonState_;
 
     static bool isHourInHalfOpenRange(uint8_t hour, uint8_t startHour, uint8_t endHour);
     static void formatDisplayActivityIntervalsInternal(uint8_t start1,

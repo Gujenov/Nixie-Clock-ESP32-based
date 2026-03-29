@@ -39,6 +39,11 @@ constexpr uint8_t STATUS_ALL_DEFINED_BITS =
 constexpr bool USE_HARDWARE_SPI = true;
 constexpr uint32_t DISPLAY_SPI_HZ = 15000000;  // 15 МГц
 
+// Временный диагностический флаг:
+// true  -> в режиме Alarm показывать реальные секунды вместо "пустых" нибблов 0xF/0xF.
+// false -> штатный режим (хвостовые нибблы alarm-экрана = 0xF/0xF).
+constexpr bool DEBUG_KEEP_SECONDS_IN_ALARM_VIEW = false;
+
 bool g_softTransitionEnabled = true;
 uint16_t g_transitionDurationMs = 150;
 
@@ -392,10 +397,18 @@ Nixie6Frame Nixie6SpiDriver::buildAlarmFrame(uint8_t hour, uint8_t minute) const
     f.nibbles[1] = ones(hour);
     f.nibbles[2] = tens(minute);
     f.nibbles[3] = ones(minute);
-    // Хвостовые два ниббла = 0xFF (проверка гашения индикаторов).
-    // В режиме reverse/invert это окажется в первых двух нибблах после applyOutputMode().
-    f.nibbles[4] = 0x0F;
-    f.nibbles[5] = 0x0F;
+
+    if (DEBUG_KEEP_SECONDS_IN_ALARM_VIEW) {
+        // Диагностика: не гасим секунды, а выводим текущие.
+        const uint8_t second = static_cast<uint8_t>((localTm_.tm_sec < 0) ? 0 : localTm_.tm_sec % 60);
+        f.nibbles[4] = tens(second);
+        f.nibbles[5] = ones(second);
+    } else {
+        // Штатный режим: хвостовые два ниббла = 0xFF (гашение индикаторов).
+        // В режиме reverse/invert это окажется в первых двух нибблах после applyOutputMode().
+        f.nibbles[4] = 0x0F;
+        f.nibbles[5] = 0x0F;
+    }
     return f;
 }
 
@@ -491,6 +504,13 @@ void Nixie6SpiDriver::maybeStartTimeTransition(const tm& previousTm, const tm& n
     const Nixie6Frame nextOut = applyOutputMode(buildTimeFrameFromTm(newTm));
 
     if (prevOut.pack() == nextOut.pack()) {
+        // В режиме частых апдейтов (например, во время sync) одно и то же время
+        // может приходить многократно. Не сбрасываем активный переход,
+        // если он уже ведёт к этому же целевому кадру.
+        if (transitionActive_ && transitionTo_.pack() == nextOut.pack()) {
+            return;
+        }
+
         transitionActive_ = false;
         return;
     }

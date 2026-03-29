@@ -14,7 +14,6 @@
 #include "platform_profile.h"
 #include "runtime_counter.h"
 #include <esp_system.h>
-#include <cstring>
 
 static bool sqwFailed = false;
 extern bool printEnabled;
@@ -23,7 +22,6 @@ static bool displayEditMode = false;
 static TaskHandle_t g_displayRefreshTaskHandle = nullptr;
 
 static bool isAntiPoisonActive();
-static bool isDisplayShowingTimeView();
 
 static void onOtaTransferStartDisplayMarker() {
     if (!displayManager.supportsSoftTransition()) {
@@ -50,7 +48,7 @@ static void displayRefreshTask(void* param) {
         // только пока реально показывается время.
         const bool allowSoftTransitionNow = displayManager.supportsSoftTransition() &&
                             isDisplayOutputEnabled() &&
-                                            isDisplayShowingTimeView() &&
+                                            displayManager.isTimeViewActive() &&
                                             !isAntiPoisonActive();
         if (allowSoftTransitionNow) {
             displayManager.serviceAnimations(nowMs);
@@ -61,7 +59,7 @@ static void displayRefreshTask(void* param) {
 
         // 2) Во время sync подстраховываем периодический апдейт времени,
         // чтобы индикация не "подвисала" из-за сетевой активности.
-        if (isSyncInProgress() && isDisplayOutputEnabled()) {
+        if (isSyncInProgress() && isDisplayOutputEnabled() && !isAntiPoisonActive()) {
             const time_t utcNow = getCurrentUTCTime();
             const time_t localNow = utcToLocal(utcNow);
             tm localTm{};
@@ -71,7 +69,11 @@ static void displayRefreshTask(void* param) {
                                                nowMs,
                                                config.alarm1.hour, config.alarm1.minute,
                                                config.alarm2.hour, config.alarm2.minute);
-            vTaskDelay(pdMS_TO_TICKS(20));
+            if (displayManager.hasActiveAnimation()) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
             continue;
         }
 
@@ -102,31 +104,12 @@ static const char* resetReasonText(esp_reset_reason_t reason) {
     }
 }
 
-struct AntiPoisonState {
-    bool active = false;
-    uint8_t pass = 0;
-    uint8_t digit = 1;
-    uint32_t nextStepMs = 0;
-};
-
-static AntiPoisonState antiPoisonState;
-
-static bool isDisplayShowingTimeView() {
-    if (!displayManager.supportsAntiPoison() && !displayManager.supportsSoftTransition()) {
-        return false;
-    }
-    return strcmp(displayManager.activeViewName(), "time") == 0;
-}
-
 static void stopCathodesAntiPoisonProcedure(const char* reason = nullptr) {
-    if (!antiPoisonState.active) {
+    if (!displayManager.isAntiPoisonActive()) {
         return;
     }
 
-    antiPoisonState.active = false;
-    antiPoisonState.pass = 0;
-    antiPoisonState.digit = 1;
-    antiPoisonState.nextStepMs = 0;
+    displayManager.stopAntiPoison();
 
     if (reason && reason[0] != '\0') {
         Serial.printf("[ANTIPOISON] Остановлено: %s\n", reason);
@@ -186,20 +169,15 @@ static void printRuntimeStateSnapshot() {
 }
 
 static bool isAntiPoisonActive() {
-    return antiPoisonState.active;
+    return displayManager.isAntiPoisonActive();
 }
 
 static bool startCathodesAntiPoisonProcedure() {
-    if (antiPoisonState.active) {
-        return false;
+    const bool started = displayManager.startAntiPoison();
+    if (started) {
+        Serial.println("Kathodes anti-poison procedure started");
     }
-
-    antiPoisonState.active = true;
-    antiPoisonState.pass = 0;
-    antiPoisonState.digit = 1;
-    antiPoisonState.nextStepMs = 0;
-    Serial.println("Kathodes anti-poison procedure started");
-    return true;
+    return started;
 }
 
 static bool ensureDisplayActiveForManualAntiPoison() {
@@ -222,25 +200,13 @@ static bool ensureDisplayActiveForManualAntiPoison() {
 }
 
 static void serviceCathodesAntiPoisonProcedure(uint32_t nowMs) {
-    if (!antiPoisonState.active) {
+    if (!displayManager.isAntiPoisonActive()) {
         return;
     }
 
-    if (antiPoisonState.nextStepMs != 0 && nowMs < antiPoisonState.nextStepMs) {
-        return;
-    }
-
-    displayManager.showUniformDigits(antiPoisonState.digit);
-    antiPoisonState.nextStepMs = nowMs + 500;
-
-    antiPoisonState.digit++;
-    if (antiPoisonState.digit > 9) {
-        antiPoisonState.digit = 1;
-        antiPoisonState.pass++;
-        if (antiPoisonState.pass >= 2) {
-            antiPoisonState.active = false;
-            Serial.println("Kathodes anti-poison procedure ended");
-        }
+    displayManager.serviceAntiPoison(nowMs);
+    if (!displayManager.isAntiPoisonActive()) {
+        Serial.println("Kathodes anti-poison procedure ended");
     }
 }
 
@@ -466,11 +432,11 @@ void loop() {
         processAllInputs();
     }
 
-    if (displayManager.supportsAntiPoison() && !isDisplayShowingTimeView() && isAntiPoisonActive()) {
+    if (displayManager.supportsAntiPoison() && !displayManager.isTimeViewActive() && isAntiPoisonActive()) {
         stopCathodesAntiPoisonProcedure("активен не-time экран");
     }
 
-    if (displayManager.supportsAntiPoison() && isDisplayShowingTimeView()) {
+    if (displayManager.supportsAntiPoison() && displayManager.isTimeViewActive()) {
         serviceCathodesAntiPoisonProcedure(currentMillis);
     }
     chimeSchedulerService();
@@ -573,7 +539,7 @@ void processSecondTick() {
         Serial.println("\n[DISP] Ручная активация сброшена: наступил штатный интервал активности");
     }
 
-    const bool displayShowsTimeNow = isDisplayShowingTimeView();
+    const bool displayShowsTimeNow = displayManager.isTimeViewActive();
     const int32_t hourMarker = (local_tm_info.tm_yday * 24) + local_tm_info.tm_hour;
     const bool shouldRunAntiPoison = displayManager.supportsAntiPoison() &&
                                      displayActiveNow &&

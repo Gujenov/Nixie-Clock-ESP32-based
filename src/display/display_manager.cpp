@@ -2,6 +2,7 @@
 #include "display/nixie_6_spi.h"
 #include "hardware.h"
 #include "platform_profile.h"
+#include <cstring>
 
 namespace {
 class VirtualDisplayDriver : public DisplayDriver {
@@ -386,6 +387,69 @@ bool DisplayManager::supportsSoftTransition() const {
 bool DisplayManager::supportsAntiPoison() const {
     // Антиотравление имеет смысл только для Nixie-индикаторов.
     return isNixieClockType();
+}
+
+bool DisplayManager::isTimeViewActive() const {
+    if (!hasActiveDriver()) {
+        return false;
+    }
+
+    // Для Nixie6 есть явные view-режимы (time/date/alarm/...)
+    if (isNixie6_) {
+        return strcmp(activeViewName(), "time") == 0;
+    }
+
+    // Для прочих backend'ов (пока без view-state) считаем, что активен базовый time-view.
+    return true;
+}
+
+bool DisplayManager::isAntiPoisonActive() const {
+    return antiPoisonState_.active;
+}
+
+bool DisplayManager::startAntiPoison() {
+    if (!supportsAntiPoison()) {
+        return false;
+    }
+
+    if (antiPoisonState_.active) {
+        return false;
+    }
+
+    antiPoisonState_.active = true;
+    antiPoisonState_.pass = 0;
+    antiPoisonState_.digit = 1;
+    antiPoisonState_.nextStepMs = 0;
+    return true;
+}
+
+void DisplayManager::stopAntiPoison() {
+    antiPoisonState_.active = false;
+    antiPoisonState_.pass = 0;
+    antiPoisonState_.digit = 1;
+    antiPoisonState_.nextStepMs = 0;
+}
+
+void DisplayManager::serviceAntiPoison(uint32_t nowMs) {
+    if (!antiPoisonState_.active) {
+        return;
+    }
+
+    if (antiPoisonState_.nextStepMs != 0 && nowMs < antiPoisonState_.nextStepMs) {
+        return;
+    }
+
+    showUniformDigits(antiPoisonState_.digit);
+    antiPoisonState_.nextStepMs = nowMs + 500;
+
+    antiPoisonState_.digit++;
+    if (antiPoisonState_.digit > 9) {
+        antiPoisonState_.digit = 1;
+        antiPoisonState_.pass++;
+        if (antiPoisonState_.pass >= 2) {
+            stopAntiPoison();
+        }
+    }
 }
 
 void DisplayManager::showOtaTransferStartMarker() {

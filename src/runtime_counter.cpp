@@ -7,6 +7,7 @@ namespace {
 constexpr const char* RUNTIME_NS = "runtime";
 constexpr const char* RUNTIME_KEY_A = "rec0";
 constexpr const char* RUNTIME_KEY_B = "rec1";
+constexpr const char* RUNTIME_PARTITION = "cfg_nvs";
 constexpr uint32_t RUNTIME_MAGIC = 0x52544D45; // RTME
 constexpr uint32_t RUNTIME_VERSION_V1 = 1;
 constexpr uint32_t RUNTIME_VERSION_V2 = 2;
@@ -38,6 +39,64 @@ RuntimeRecord g_state = {};
 bool g_initialized = false;
 bool g_activeSlotIsA = true;
 uint32_t g_unsavedSeconds = 0;
+bool g_runtimePrefsFallbackWarned = false;
+
+bool beginRuntimePrefs(Preferences& prefs, bool readOnly) {
+    if (prefs.begin(RUNTIME_NS, readOnly, RUNTIME_PARTITION)) {
+        return true;
+    }
+
+    if (!g_runtimePrefsFallbackWarned) {
+        g_runtimePrefsFallbackWarned = true;
+        Serial.print("\n[SYSTEM][WARN] Раздел cfg_nvs недоступен для runtime, fallback на default NVS");
+    }
+
+    return prefs.begin(RUNTIME_NS, readOnly);
+}
+
+void migrateLegacyRuntimeIfNeeded() {
+    Preferences cfgPrefs;
+    if (!cfgPrefs.begin(RUNTIME_NS, false, RUNTIME_PARTITION)) {
+        return;
+    }
+
+    const size_t cfgLenA = cfgPrefs.getBytesLength(RUNTIME_KEY_A);
+    const size_t cfgLenB = cfgPrefs.getBytesLength(RUNTIME_KEY_B);
+    if (cfgLenA > 0 || cfgLenB > 0) {
+        cfgPrefs.end();
+        return;
+    }
+
+    Preferences legacyPrefs;
+    if (!legacyPrefs.begin(RUNTIME_NS, true)) {
+        cfgPrefs.end();
+        return;
+    }
+
+    bool migratedAny = false;
+    const char* keys[2] = {RUNTIME_KEY_A, RUNTIME_KEY_B};
+    for (uint8_t i = 0; i < 2; ++i) {
+        const char* key = keys[i];
+        const size_t len = legacyPrefs.getBytesLength(key);
+        if (len != sizeof(RuntimeRecord) && len != sizeof(RuntimeRecordV1)) {
+            continue;
+        }
+
+        uint8_t raw[sizeof(RuntimeRecord)] = {0};
+        const size_t got = legacyPrefs.getBytes(key, raw, len);
+        if (got == len) {
+            const size_t written = cfgPrefs.putBytes(key, raw, len);
+            migratedAny = migratedAny || (written == len);
+        }
+    }
+
+    legacyPrefs.end();
+    cfgPrefs.end();
+
+    if (migratedAny) {
+        Serial.print("\n[SYSTEM] Миграция runtime в cfg_nvs завершена");
+    }
+}
 
 uint32_t fnv1aHash(const uint8_t* bytes, size_t len) {
     uint32_t hash = 2166136261u;
@@ -73,7 +132,7 @@ bool isValidRecordV2(const RuntimeRecord& rec) {
 }
 
 bool readRecord(const char* key, RuntimeRecord& out) {
-    if (!g_prefs.begin(RUNTIME_NS, true)) {
+    if (!beginRuntimePrefs(g_prefs, true)) {
         return false;
     }
 
@@ -116,7 +175,7 @@ bool writeRecord(const char* key, RuntimeRecord& rec) {
     rec.version = RUNTIME_VERSION;
     rec.crc = hashRecordV2(rec);
 
-    if (!g_prefs.begin(RUNTIME_NS, false)) {
+    if (!beginRuntimePrefs(g_prefs, false)) {
         return false;
     }
 
@@ -153,6 +212,8 @@ bool writeCurrentToNextSlot() {
 } // namespace
 
 void runtimeCounterInit() {
+    migrateLegacyRuntimeIfNeeded();
+
     RuntimeRecord recA = {};
     RuntimeRecord recB = {};
     const bool validA = readRecord(RUNTIME_KEY_A, recA);

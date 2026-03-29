@@ -43,6 +43,40 @@ static bool clearDs3231OsfFlag(uint8_t currentStatus) {
     return Wire.endTransmission() == 0;
 }
 
+static bool isLeapYearValue(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static uint8_t daysInMonthValue(int year, int month) {
+    if (month == 2) {
+        return static_cast<uint8_t>(isLeapYearValue(year) ? 29 : 28);
+    }
+    if (month == 4 || month == 6 || month == 9 || month == 11) {
+        return 30;
+    }
+    return 31;
+}
+
+static bool isDs3231DateTimeValid(const DateTime& dt) {
+    const int year = dt.year();
+    const int month = dt.month();
+    const int day = dt.day();
+    const int hour = dt.hour();
+    const int minute = dt.minute();
+    const int second = dt.second();
+
+    if (year < 2025 || year > 2100) return false;
+    if (month < 1 || month > 12) return false;
+    if (day < 1 || day > daysInMonthValue(year, month)) return false;
+
+    // Строгая валидация времени (реальные диапазоны часов).
+    if (hour < 0 || hour > 23) return false;
+    if (minute < 0 || minute > 59) return false;
+    if (second < 0 || second > 59) return false;
+
+    return true;
+}
+
 // Основная функция проверки и инициализации источников времени
 // Вызывается при старте и потом при каждом получении времени
 void checkTimeSource() {
@@ -93,9 +127,11 @@ void checkTimeSource() {
             Serial.print("\n[DS3231] Инициализирован");
             
             // Получаем время от DS3231 (без рекурсивного checkTimeSource())
-            time_t currentTime = convertDateTimeToTimeT(rtc->now());
-            
-            if (currentTime > 0) {  // Проверяем, что время корректно
+            const DateTime dsNow = rtc->now();
+            const bool dsNowValid = isDs3231DateTimeValid(dsNow);
+            time_t currentTime = dsNowValid ? convertDateTimeToTimeT(dsNow) : 0;
+
+            if (dsNowValid && currentTime > 0) {
                 // Сравниваем с системным временем
                 time_t sys_time;
                 time(&sys_time);
@@ -109,7 +145,7 @@ void checkTimeSource() {
                 // ВАЖНО: Устанавливаем флаг для показа сообщения!
                 showConnectionMessage = true;
             } else {
-                Serial.print("\n[DS3231] Получено некорректное время");
+                Serial.print("\n[DS3231] Получено невалидное время");
                 setDefaultTimeToAllSources();
             }
             
@@ -126,10 +162,12 @@ void checkTimeSource() {
             currentTimeSource = EXTERNAL_DS3231;
             
             if (rtc) {
-                time_t currentTime = convertDateTimeToTimeT(rtc->now());
-                
-                if (currentTime == 0) {
-                    Serial.print("\n[DS3231] Повторное подключение: время некорректно");
+                const DateTime dsNow = rtc->now();
+                const bool dsNowValid = isDs3231DateTimeValid(dsNow);
+                time_t currentTime = dsNowValid ? convertDateTimeToTimeT(dsNow) : 0;
+
+                if (!dsNowValid || currentTime == 0) {
+                    Serial.print("\n[DS3231] Повторное подключение: время невалидно");
                     setDefaultTimeToAllSources();
                 } else {
                     time_t sys_time;
@@ -159,16 +197,29 @@ void checkTimeSource() {
                 if (!osfRecoveryInProgress) {
                     Serial.print("\n[DS3231] ⚠️ Флаг OSF установлен (питание пропадало)");
 
-                    if (!clearDs3231OsfFlag(status)) {
-                        Serial.print("\n[DS3231] ⚠️ Не удалось сбросить флаг OSF");
+                    const DateTime dsNow = rtc->now();
+                    const bool dsNowValid = isDs3231DateTimeValid(dsNow);
+
+                    if (dsNowValid) {
+                        const time_t currentTime = convertDateTimeToTimeT(dsNow);
+                        if (currentTime > 0) {
+                            // Принимаем время DS3231 и обновляем внутренний RTC ESP32.
+                            setTimeToAllSources(currentTime);
+                            Serial.print("\n[DS3231] OSF: время валидно, принимаю текущее значение");
+                        } else {
+                            Serial.print("\n[DS3231] OSF: ошибка конвертации времени, применяю default");
+                            setDefaultTimeToAllSources();
+                        }
+                    } else {
+                        Serial.print("\n[DS3231] OSF: время невалидно, применяю default");
+                        setDefaultTimeToAllSources();
                     }
 
-                    // Ставим безопасное время сразу в оба источника (RTC + DS3231).
-                    setDefaultTimeToAllSources();
-
-                    // Восстановление после OSF должно выполняться независимо от auto_sync_enabled.
-                    Serial.print("\nПопытка синхронизировать время с NTP...");
-                    syncTimeAsync(true);
+                    if (!clearDs3231OsfFlag(status)) {
+                        Serial.print("\n[DS3231] ⚠️ Не удалось сбросить флаг OSF");
+                    } else {
+                        Serial.print("\n[DS3231] Флаг OSF сброшен");
+                    }
 
                     osfRecoveryInProgress = true;
                 }
@@ -273,8 +324,8 @@ void requestTimeTickResync() {
 
 static bool applyNtpTime(time_t utcTime, bool force, bool auto_sync_was_enabled) {
     // Проверяем, что время валидное (не 1970 год)
-    // Используем порог: 2025-07-06 09:00:00 UTC (наше значение по умолчанию)
-    if (utcTime <= 1751792400) { // После 2025-07-06 09:00 UTC
+    // Используем порог: 2025-07-06 07:05:00 UTC (наше значение по умолчанию)
+    if (utcTime <= 1751785500) { // После 2025-07-06 07:05 UTC
         Serial.print("\n[NTP] Ошибка: получено некорректное время");
         return false;
     }
@@ -671,20 +722,20 @@ void printTimeFromTimeT(time_t utcTime) {
     }
 }
 
-// Установка времени по умолчанию: 9:00 6.07.2025
+// Установка времени по умолчанию: 7:05 6.07.2025
 void setDefaultTimeToAllSources() {
     struct tm default_tm = {0};
     default_tm.tm_year = 125;     // 2025
     default_tm.tm_mon = 7 - 1;
     default_tm.tm_mday = 6;
-    default_tm.tm_hour = 9;
-    default_tm.tm_min = 0;
+    default_tm.tm_hour = 7;
+    default_tm.tm_min = 5;
     default_tm.tm_sec = 0;
     default_tm.tm_isdst = 0;
     
     time_t default_time = mktime(&default_tm);
 
-    Serial.print("\n[SYSTEM] Устанавливаю время по умолчанию: 2025-07-06 09:00:00 UTC");
+    Serial.print("\n[SYSTEM] Устанавливаю время по умолчанию: 2025-07-06 07:05:00 UTC");
     // Устанавливаем во все источники
     setTimeToAllSources(default_time);
 }

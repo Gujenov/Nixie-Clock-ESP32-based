@@ -11,6 +11,18 @@ Config config;
 
 namespace {
 
+constexpr const char* kConfigPrefsNamespace = "config";
+constexpr const char* kConfigPrefsPartition = "cfg_nvs";
+
+bool beginConfigPreferences(bool readOnly) {
+  if (preferences.begin(kConfigPrefsNamespace, readOnly, kConfigPrefsPartition)) {
+    return true;
+  }
+
+  Serial.print("\n[SYSTEM][WARN] Раздел cfg_nvs недоступен, fallback на default NVS");
+  return preferences.begin(kConfigPrefsNamespace, readOnly);
+}
+
 // Layout до добавления пользовательских настроек звука/дисплея.
 // Нужен для корректной миграции без сдвига alarm1/alarm2.
 struct ConfigLegacyV1 {
@@ -59,9 +71,26 @@ void applyNewUserSettingsDefaults() {
 } // namespace
 
 void initConfiguration() {
-  preferences.begin("config", false);
+  beginConfigPreferences(false);
   
   size_t stored_size = preferences.getBytesLength("data");
+
+  // Одноразовая миграция: если в выделенном cfg_nvs ничего нет,
+  // пробуем подтянуть ранее сохранённую конфигурацию из default NVS.
+  if (stored_size == 0) {
+    Preferences legacyPrefs;
+    if (legacyPrefs.begin(kConfigPrefsNamespace, true)) {
+      const size_t legacy_size = legacyPrefs.getBytesLength("data");
+      if (legacy_size > 0 && legacy_size <= sizeof(config)) {
+        Config legacyBlob = {};
+        legacyPrefs.getBytes("data", &legacyBlob, legacy_size);
+        preferences.putBytes("data", &legacyBlob, legacy_size);
+        stored_size = preferences.getBytesLength("data");
+        Serial.printf("\n[SYSTEM] Миграция config в cfg_nvs: %u байт", static_cast<unsigned>(legacy_size));
+      }
+      legacyPrefs.end();
+    }
+  }
   
   // Проверяем, есть ли сохраненная конфигурация
   if(stored_size == 0) {
@@ -398,7 +427,7 @@ void setDefaultConfig() {
 }
 
 void saveConfig() {
-  preferences.begin("config", false);
+  beginConfigPreferences(false);
   preferences.putBytes("data", &config, sizeof(config));
   preferences.end();
   platformRefreshCapabilities();
