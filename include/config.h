@@ -6,7 +6,7 @@
 
 // Версии и размеры буферов
 // MCU.HW_VARIANT.RELEASE_TYPE.BUILD_DATE
-#define FIRMWARE_VERSION "1.A0.3.260329"
+#define FIRMWARE_VERSION "1.A0.3.260416"
 
 #define TIME_BUF_SIZE 64
 #define TZ_BUF_SIZE 60
@@ -18,22 +18,16 @@
 #define OTA_WINDOW_MS 300000UL   // 5 минут
 #define OTA_CONNECT_TIMEOUT_MS 12000UL
 
-// Конфигурация пинов
-#define LED_PIN 48
-
 // Audio I2S (ESP32-S3 -> MAX98357A)
-#define AUDIO_I2S_BCLK_PIN 16   // I2S BCLK
-#define AUDIO_I2S_LRCLK_PIN 17  // I2S WS/LRCLK
-#define AUDIO_I2S_DOUT_PIN 9    // I2S DOUT (data to DAC)
+#define AUDIO_I2S_BCLK_PIN 48   // I2S BCLK
+#define AUDIO_I2S_LRCLK_PIN 47  // I2S WS/LRCLK
+#define AUDIO_I2S_DOUT_PIN 38    // I2S DOUT (data to DAC)
 
 // microSD (SPI mode)
-#define SD_SPI_SCK_PIN 12
-#define SD_SPI_MOSI_PIN 11
-#define SD_SPI_MISO_PIN 13
-#define SD_SPI_CS_PIN 10
-
-// Датчик освещенности (ADC)
-#define LIGHT_SENSOR_PIN 14
+#define SD_SPI_SCK_PIN 18
+#define SD_SPI_MOSI_PIN 17
+#define SD_SPI_MISO_PIN 16
+#define SD_SPI_CS_PIN 15
 
 // Настройки таймера
 #define TIMER_DIVIDER 80
@@ -163,11 +157,15 @@ struct Config {
 
     // Параметры фильтра датчика освещенности
     uint8_t light_filter_samples;      // 1..64
-    uint8_t light_sensor_resolution_bits; // 9..12 (по умолчанию 10)
+    uint8_t light_sensor_resolution_bits; // [legacy] оставлено для совместимости конфигурации
     
     // Будильники
     AlarmSettings alarm1;
     AlarmSettings alarm2;
+
+    // Громкость уведомлений вынесена в конец структуры для безопасной миграции
+    // (чтобы не сдвигать существующие поля в сохранённых конфигурациях).
+    uint8_t notification_volume;    // 0..100 (прочие звуки: BLE/SFX/системные уведомления)
 };
 
 enum HardwareSource { INTERNAL_RTC, EXTERNAL_DS3231 };

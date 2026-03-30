@@ -1,6 +1,8 @@
 #include "display/nixie_6_spi.h"
 #include "config.h"
 #include <SPI.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 namespace {
 constexpr uint16_t DATA_SETUP_US = 1;
@@ -49,6 +51,38 @@ uint16_t g_transitionDurationMs = 150;
 
 SPIClass g_displaySpi(HSPI);
 bool g_displaySpiReady = false;
+SemaphoreHandle_t g_nixieDriverMutex = nullptr;
+
+bool lockNixieDriver(uint32_t timeoutMs = 20) {
+    if (g_nixieDriverMutex == nullptr) {
+        g_nixieDriverMutex = xSemaphoreCreateRecursiveMutex();
+        if (g_nixieDriverMutex == nullptr) {
+            return false;
+        }
+    }
+    return xSemaphoreTakeRecursive(g_nixieDriverMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
+
+void unlockNixieDriver() {
+    if (g_nixieDriverMutex != nullptr) {
+        xSemaphoreGiveRecursive(g_nixieDriverMutex);
+    }
+}
+
+class ScopedNixieDriverLock {
+public:
+    ScopedNixieDriverLock() : locked_(lockNixieDriver()) {}
+    ~ScopedNixieDriverLock() {
+        if (locked_) {
+            unlockNixieDriver();
+        }
+    }
+
+    bool locked() const { return locked_; }
+
+private:
+    bool locked_ = false;
+};
 
 inline uint8_t reverseNibbleBits(uint8_t nibble) {
     nibble &= 0x0F;
@@ -81,6 +115,11 @@ uint16_t nixie6GetTransitionDurationMs() {
 }
 
 void Nixie6SpiDriver::begin() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     pinMode(latchPin_, OUTPUT);
     pinMode(sckPin_, OUTPUT);
     pinMode(mosiPin_, OUTPUT);
@@ -103,6 +142,11 @@ void Nixie6SpiDriver::setBrightness(uint8_t level) {
 }
 
 void Nixie6SpiDriver::showTime(uint8_t hours, uint8_t minutes, uint8_t seconds, bool showColon) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     (void)showColon;
 
     localTm_.tm_hour = hours;
@@ -117,6 +161,11 @@ void Nixie6SpiDriver::showTime(uint8_t hours, uint8_t minutes, uint8_t seconds, 
 }
 
 void Nixie6SpiDriver::testPattern() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     Nixie6Frame f;
     f.startFlags = statusFlagsWithSeparators();
     f.nibbles[0] = 8;
@@ -129,6 +178,11 @@ void Nixie6SpiDriver::testPattern() {
 }
 
 void Nixie6SpiDriver::showUniformDigits(uint8_t digit) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     if (digit > 9) digit = 9;
     transitionActive_ = false;  // антиотравление/ручные шаблоны — без soft-transition
     const Nixie6Frame f = applyOutputMode(buildUniformFrame(digit));
@@ -136,6 +190,11 @@ void Nixie6SpiDriver::showUniformDigits(uint8_t digit) {
 }
 
 void Nixie6SpiDriver::trigger1(bool allowAlarmViews) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     if (editPlaceholder_) {
         return;
     }
@@ -168,6 +227,11 @@ void Nixie6SpiDriver::trigger1(bool allowAlarmViews) {
 }
 
 void Nixie6SpiDriver::trigger2() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     if (editPlaceholder_) {
         return;
     }
@@ -197,6 +261,11 @@ void Nixie6SpiDriver::trigger2() {
 }
 
 void Nixie6SpiDriver::tick(uint32_t nowMs) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     if (editPlaceholder_ || secondaryBranchActive_) {
         return;
     }
@@ -208,50 +277,105 @@ void Nixie6SpiDriver::tick(uint32_t nowMs) {
 }
 
 void Nixie6SpiDriver::enterEditPlaceholder() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     editPlaceholder_ = true;
 }
 
 void Nixie6SpiDriver::exitEditPlaceholder() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     editPlaceholder_ = false;
 }
 
 void Nixie6SpiDriver::setStartFlags(uint8_t flags) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     startFlags_ = flags;
 }
 
 void Nixie6SpiDriver::setAlarm1(uint8_t hour, uint8_t minute) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     al1Hour_ = hour % 24;
     al1Minute_ = minute % 60;
 }
 
 void Nixie6SpiDriver::setAlarm2(uint8_t hour, uint8_t minute) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     al2Hour_ = hour % 24;
     al2Minute_ = minute % 60;
 }
 
 void Nixie6SpiDriver::setPressureMmHg(uint16_t pressure) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     pressureMmHg_ = pressure;
 }
 
 void Nixie6SpiDriver::setHumidityPercent(uint8_t humidity) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     humidityPercent_ = (humidity > 99) ? 99 : humidity;
 }
 
 void Nixie6SpiDriver::setTemperatureC(int16_t temperature) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     temperatureC_ = temperature;
 }
 
 void Nixie6SpiDriver::updateFromLocalTime(const tm& localTm) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     const tm previousTm = localTm_;
     maybeStartTimeTransition(previousTm, localTm, millis());
     localTm_ = localTm;
 }
 
 void Nixie6SpiDriver::setMainModeTimeoutMs(uint32_t timeoutMs) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     mainModeTimeoutMs_ = timeoutMs;
 }
 
 Nixie6View Nixie6SpiDriver::currentView() const {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return Nixie6View::DefaultTime;
+    }
+
     if (editPlaceholder_) {
         return Nixie6View::EditPlaceholder;
     }
@@ -275,6 +399,11 @@ Nixie6View Nixie6SpiDriver::currentView() const {
 }
 
 Nixie6Frame Nixie6SpiDriver::currentFrame() const {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return Nixie6Frame{};
+    }
+
     switch (currentView()) {
         case Nixie6View::DefaultTime: return buildTimeFrame();
         case Nixie6View::Date: return buildDateFrame();
@@ -290,16 +419,31 @@ Nixie6Frame Nixie6SpiDriver::currentFrame() const {
 }
 
 uint32_t Nixie6SpiDriver::packedFrame() const {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return 0;
+    }
+
     // Логический кадр для диагностики/отладки (без аппаратных трансформаций)
     return currentFrame().pack();
 }
 
 uint32_t Nixie6SpiDriver::packedFrameOutput() const {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return 0;
+    }
+
     // Кадр после преобразования режима вывода (порядок разрядов)
     return applyOutputMode(currentFrame()).pack();
 }
 
 void Nixie6SpiDriver::pushFrame() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     // На шину уходит кадр c учетом активной анимации soft-transition (если есть).
     if (transitionActive_ && (millis() - transitionStartMs_) >= transitionDurationMs_) {
         transitionActive_ = false;
@@ -309,6 +453,11 @@ void Nixie6SpiDriver::pushFrame() {
 }
 
 void Nixie6SpiDriver::serviceTransition(uint32_t nowMs) {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     if (!transitionActive_) {
         return;
     }
@@ -322,10 +471,20 @@ void Nixie6SpiDriver::serviceTransition(uint32_t nowMs) {
 }
 
 void Nixie6SpiDriver::cancelTransition() {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return;
+    }
+
     transitionActive_ = false;
 }
 
 bool Nixie6SpiDriver::isTransitionActive() const {
+    ScopedNixieDriverLock lock;
+    if (!lock.locked()) {
+        return false;
+    }
+
     return transitionActive_;
 }
 

@@ -186,6 +186,7 @@ void printDisplayMenu() {
     if (soundEnabled) {
         Serial.printf("\n║ Громкость будильника: %3u%%", static_cast<unsigned>(config.alarm_volume));
         Serial.printf("\n║ Громкость боя:        %3u%%", static_cast<unsigned>(config.chime_volume));
+        Serial.printf("\n║ Громк. уведомлений:   %3u%%", static_cast<unsigned>(config.notification_volume));
         Serial.printf("\n║ Бой в час:            %u", static_cast<unsigned>(config.chimes_per_hour));
         Serial.printf("\n║ Активность боя:       %u-%u", static_cast<unsigned>(config.chime_active_start_hour), static_cast<unsigned>(config.chime_active_end_hour));
     } else {
@@ -209,6 +210,7 @@ void printDisplayMenu() {
         Serial.println("\nНастройка громкости:");
         Serial.println("  set alarm volume / sav 0...100      - Уровень громкости будильника");
         Serial.println("  set bell volume / sbv 0...100       - Уровень громкости боя");
+        Serial.println("  set notify volume / snv 0...100     - Уровень прочих уведомлений (BLE/SFX)");
 
         Serial.println("\nНастройка боя:");
         Serial.println("  bells per hour / bph 0|1|2|4        - 4=четвертной, 2=половинный, 1=часовой, 0=выкл");
@@ -274,6 +276,26 @@ void handleDisplayMenu(String command) {
             config.chime_volume = static_cast<uint8_t>(v);
             saveConfig();
             Serial.printf("Громкость боя: %u%%\n", static_cast<unsigned>(config.chime_volume));
+        }
+        printDisplayMenu();
+        return;
+    }
+
+    if (lower.startsWith("set notify volume ") || lower.startsWith("snv ")) {
+        String arg;
+        if (lower.startsWith("snv ")) {
+            arg = lower.substring(4);
+        } else {
+            arg = lower.substring(18);
+        }
+        arg.trim();
+        int v = arg.toInt();
+        if (arg.length() == 0 || v < 0 || v > 100) {
+            Serial.println("Неверное значение. Используйте 0...100");
+        } else {
+            config.notification_volume = static_cast<uint8_t>(v);
+            saveConfig();
+            Serial.printf("Громкость уведомлений: %u%%\n", static_cast<unsigned>(config.notification_volume));
         }
         printDisplayMenu();
         return;

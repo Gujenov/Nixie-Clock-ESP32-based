@@ -142,31 +142,38 @@ void checkAlarms() {
     struct tm timeinfo;
     gmtime_r(&now_local, &timeinfo);  // now_local уже со смещением
 
+    checkAlarmsAtTick(now_utc, timeinfo);
+}
+
+void checkAlarmsAtTick(time_t now_utc, const tm& local_timeinfo) {
+    if (!alarmFeatureEnabled()) {
+        return;
+    }
+
     // Проверяем только в 00 секунд заданной минуты
-    if (timeinfo.tm_sec != 0) {
+    if (local_timeinfo.tm_sec != 0) {
         return;
     }
     
     // Лямбда для проверки одного будильника
-    auto checkAlarm = [&timeinfo](const AlarmSettings &alarm, uint8_t num) {
+    auto checkAlarm = [&local_timeinfo, now_utc](const AlarmSettings &alarm, uint8_t num) {
         if (alarm.enabled && 
-            alarm.hour == timeinfo.tm_hour && 
-            alarm.minute == timeinfo.tm_min) {
+            alarm.hour == local_timeinfo.tm_hour && 
+            alarm.minute == local_timeinfo.tm_min) {
 
-            if (num == 2 && !isDayInMask(alarm.days_mask, timeinfo.tm_wday)) {
+            if (num == 2 && !isDayInMask(alarm.days_mask, local_timeinfo.tm_wday)) {
                 return;
             }
             
             Serial.printf("[ALARM %d] Сработал в %02d:%02d:%02d (локальное время)\n", 
                         num, 
-                        timeinfo.tm_hour, 
-                        timeinfo.tm_min, 
-                        timeinfo.tm_sec);
+                        local_timeinfo.tm_hour, 
+                        local_timeinfo.tm_min, 
+                        local_timeinfo.tm_sec);
             
             // Дополнительная информация для отладки
-            time_t utc_now = getCurrentUTCTime();
             struct tm utc_tm;
-            gmtime_r(&utc_now, &utc_tm);
+            gmtime_r(&now_utc, &utc_tm);
             
             Serial.printf("[ALARM %d] UTC время: %02d:%02d:%02d\n",
                         num,

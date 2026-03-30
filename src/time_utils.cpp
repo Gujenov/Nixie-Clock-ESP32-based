@@ -125,6 +125,13 @@ void checkTimeSource() {
             currentTimeSource = EXTERNAL_DS3231;
 
             Serial.print("\n[DS3231] Инициализирован");
+
+            uint8_t initStatus = 0;
+            const bool initStatusOk = readDs3231Status(initStatus);
+            const bool osfSetOnInit = initStatusOk && ((initStatus & 0x80U) != 0);
+            if (osfSetOnInit) {
+                Serial.print("\n[DS3231][OSF][INIT] ⚠️ Флаг OSF установлен (питание пропадало)");
+            }
             
             // Получаем время от DS3231 (без рекурсивного checkTimeSource())
             const DateTime dsNow = rtc->now();
@@ -141,12 +148,38 @@ void checkTimeSource() {
                     struct timeval tv = { currentTime, 0 };
                     settimeofday(&tv, NULL);
                 }
+
+                if (osfSetOnInit) {
+                    Serial.print("\n[DS3231][OSF][INIT] время валидно, копирую DS3231 -> RTC ESP32");
+                }
                 
                 // ВАЖНО: Устанавливаем флаг для показа сообщения!
                 showConnectionMessage = true;
             } else {
-                Serial.print("\n[DS3231] Получено невалидное время");
+                if (osfSetOnInit) {
+                    Serial.print("\n[DS3231][OSF][INIT] время невалидно, применяю default");
+                } else {
+                    Serial.print("\n[DS3231] Получено невалидное время");
+                }
                 setDefaultTimeToAllSources();
+
+                // После default дополнительно подтверждаем копирование DS3231 -> RTC ESP32.
+                const DateTime recovered = rtc->now();
+                const bool recoveredValid = isDs3231DateTimeValid(recovered);
+                const time_t recoveredUtc = recoveredValid ? convertDateTimeToTimeT(recovered) : 0;
+                if (recoveredValid && recoveredUtc > 0) {
+                    struct timeval tv = { recoveredUtc, 0 };
+                    settimeofday(&tv, NULL);
+                    Serial.print("\n[DS3231][OSF][INIT] после default копирую DS3231 -> RTC ESP32");
+                }
+            }
+
+            if (osfSetOnInit) {
+                if (!clearDs3231OsfFlag(initStatus)) {
+                    Serial.print("\n[DS3231][OSF][INIT] ⚠️ Не удалось сбросить флаг OSF");
+                } else {
+                    Serial.print("\n[DS3231][OSF][INIT] Флаг OSF сброшен");
+                }
             }
             
             setupInterrupts();
@@ -195,7 +228,7 @@ void checkTimeSource() {
             const bool osfSet = (status & 0x80U) != 0;
             if (osfSet) {
                 if (!osfRecoveryInProgress) {
-                    Serial.print("\n[DS3231] ⚠️ Флаг OSF установлен (питание пропадало)");
+                    Serial.print("\n[DS3231][OSF][RUNTIME] ⚠️ Флаг OSF установлен (питание пропадало)");
 
                     const DateTime dsNow = rtc->now();
                     const bool dsNowValid = isDs3231DateTimeValid(dsNow);
@@ -205,20 +238,20 @@ void checkTimeSource() {
                         if (currentTime > 0) {
                             // Принимаем время DS3231 и обновляем внутренний RTC ESP32.
                             setTimeToAllSources(currentTime);
-                            Serial.print("\n[DS3231] OSF: время валидно, принимаю текущее значение");
+                            Serial.print("\n[DS3231][OSF][RUNTIME] время валидно, принимаю текущее значение");
                         } else {
-                            Serial.print("\n[DS3231] OSF: ошибка конвертации времени, применяю default");
+                            Serial.print("\n[DS3231][OSF][RUNTIME] ошибка конвертации времени, применяю default");
                             setDefaultTimeToAllSources();
                         }
                     } else {
-                        Serial.print("\n[DS3231] OSF: время невалидно, применяю default");
+                        Serial.print("\n[DS3231][OSF][RUNTIME] время невалидно, применяю default");
                         setDefaultTimeToAllSources();
                     }
 
                     if (!clearDs3231OsfFlag(status)) {
-                        Serial.print("\n[DS3231] ⚠️ Не удалось сбросить флаг OSF");
+                        Serial.print("\n[DS3231][OSF][RUNTIME] ⚠️ Не удалось сбросить флаг OSF");
                     } else {
-                        Serial.print("\n[DS3231] Флаг OSF сброшен");
+                        Serial.print("\n[DS3231][OSF][RUNTIME] Флаг OSF сброшен");
                     }
 
                     osfRecoveryInProgress = true;
@@ -575,7 +608,6 @@ static void wifiSyncTask(void* param) {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
-    digitalWrite(LED_PIN, LOW);
     if (!success) {
         blinkError(3);
         Serial.print("\n[SYNC] Не удалось синхронизировать время!\n");
@@ -635,8 +667,6 @@ void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
     strlcpy(syncPass2, config.wifi_pass_2, sizeof(syncPass2));
     syncLastResult = false;
 
-    digitalWrite(LED_PIN, HIGH);
-
     syncInProgress = true;
 
     // Создаём RTOS-задачу на ядре 0 (вместе с WiFi системными задачами)
@@ -655,7 +685,6 @@ void syncTimeAsync(bool force, uint8_t preferredNtpIndex) {
     if (result != pdPASS) {
         Serial.print("\n[SYNC] ОШИБКА: не удалось создать задачу синхронизации времени");
         syncInProgress = false;
-        digitalWrite(LED_PIN, LOW);
     } else {
         Serial.print("\n\n[SYNC] Синхронизация запущена в фоне (FreeRTOS Task)");
     }
