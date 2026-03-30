@@ -57,8 +57,10 @@ struct WavStreamState {
 
 static constexpr char FLASH_ALARM_WAV[] = "/alarm_default.wav";
 static constexpr char FLASH_CHIMES_WAV[] = "/sfx_himes.wav";
+static constexpr char FLASH_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SD_CHIME_HOUR_WAV[] = "/chime_hour.wav";
 static constexpr char SD_CHIME_QUARTER_WAV[] = "/chime_quarter.wav";
+static constexpr char SD_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
 static constexpr char SFX_BLE_OFF[] = "/sfx_ble_off.wav";
 static constexpr char SFX_BLE_CONNECTED[] = "/sfx_ble_connected.wav";
@@ -76,6 +78,8 @@ static bool g_sdReady = false;
 static uint32_t g_lastSdProbeMs = 0;
 static AudioTestSource g_lastTestSource = AudioTestSource::None;
 static SPIClass g_sdSpi(FSPI);
+
+static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamState& wav);
 
 static void invalidateSdMount(const char* reason = nullptr) {
     if (reason && reason[0] != '\0') {
@@ -234,44 +238,101 @@ static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& ou
     }
 
     const size_t fileSize = static_cast<size_t>(f.size());
-    if (fileSize < 44) {
+    if (fileSize < 12) {
         f.close();
         Serial.printf("\n[AUDIO] WAV too small: %s (%lu bytes)", path, static_cast<unsigned long>(fileSize));
         return false;
     }
 
-    uint8_t header[44] = {0};
-    if (f.read(header, sizeof(header)) != sizeof(header)) {
+    uint8_t riff[12] = {0};
+    if (f.read(riff, sizeof(riff)) != sizeof(riff)) {
         f.close();
         Serial.printf("\n[AUDIO] WAV header read failed: %s", path);
         return false;
     }
 
-    const bool riffOk = std::memcmp(header + 0, "RIFF", 4) == 0;
-    const bool waveOk = std::memcmp(header + 8, "WAVE", 4) == 0;
-    const bool fmtOk = std::memcmp(header + 12, "fmt ", 4) == 0;
-    const bool dataOk = std::memcmp(header + 36, "data", 4) == 0;
-    if (!riffOk || !waveOk || !fmtOk || !dataOk) {
+    const bool riffOk = std::memcmp(riff + 0, "RIFF", 4) == 0;
+    const bool waveOk = std::memcmp(riff + 8, "WAVE", 4) == 0;
+    if (!riffOk || !waveOk) {
         f.close();
         Serial.printf("\n[AUDIO] WAV header unsupported: %s", path);
         return false;
     }
 
-    auto rd16 = [&](size_t off) -> uint16_t {
-        return static_cast<uint16_t>(header[off] | (header[off + 1] << 8));
+    auto rd16 = [](const uint8_t* p) -> uint16_t {
+        return static_cast<uint16_t>(p[0] | (p[1] << 8));
     };
-    auto rd32 = [&](size_t off) -> uint32_t {
-        return static_cast<uint32_t>(header[off]) |
-               (static_cast<uint32_t>(header[off + 1]) << 8) |
-               (static_cast<uint32_t>(header[off + 2]) << 16) |
-               (static_cast<uint32_t>(header[off + 3]) << 24);
+    auto rd32 = [](const uint8_t* p) -> uint32_t {
+        return static_cast<uint32_t>(p[0]) |
+               (static_cast<uint32_t>(p[1]) << 8) |
+               (static_cast<uint32_t>(p[2]) << 16) |
+               (static_cast<uint32_t>(p[3]) << 24);
     };
 
-    const uint16_t audioFormat = rd16(20);
-    const uint16_t channels = rd16(22);
-    const uint32_t sampleRate = rd32(24);
-    const uint16_t bits = rd16(34);
-    const uint32_t dataSize = rd32(40);
+    bool fmtFound = false;
+    bool dataFound = false;
+    uint16_t audioFormat = 0;
+    uint16_t channels = 0;
+    uint32_t sampleRate = 0;
+    uint16_t bits = 0;
+    uint32_t dataSize = 0;
+    uint32_t dataOffset = 0;
+
+    while (f.available()) {
+        uint8_t chunkHdr[8] = {0};
+        if (f.read(chunkHdr, sizeof(chunkHdr)) != sizeof(chunkHdr)) {
+            break;
+        }
+
+        const uint32_t chunkSize = rd32(chunkHdr + 4);
+        const uint32_t chunkDataPos = static_cast<uint32_t>(f.position());
+        const uint32_t chunkSkip = chunkSize + (chunkSize & 1U);
+
+        if (std::memcmp(chunkHdr, "fmt ", 4) == 0) {
+            if (chunkSize < 16) {
+                f.close();
+                Serial.printf("\n[AUDIO] WAV fmt chunk too small: %s", path);
+                return false;
+            }
+
+            uint8_t fmt16[16] = {0};
+            if (f.read(fmt16, sizeof(fmt16)) != sizeof(fmt16)) {
+                f.close();
+                Serial.printf("\n[AUDIO] WAV fmt chunk read failed: %s", path);
+                return false;
+            }
+
+            audioFormat = rd16(fmt16 + 0);
+            channels = rd16(fmt16 + 2);
+            sampleRate = rd32(fmt16 + 4);
+            bits = rd16(fmt16 + 14);
+            fmtFound = true;
+
+            if (chunkSize > 16) {
+                f.seek(chunkDataPos + chunkSkip, SeekSet);
+            }
+            continue;
+        }
+
+        if (std::memcmp(chunkHdr, "data", 4) == 0) {
+            dataSize = chunkSize;
+            dataOffset = chunkDataPos;
+            dataFound = true;
+            if (fmtFound) {
+                break;
+            }
+            f.seek(chunkDataPos + chunkSkip, SeekSet);
+            continue;
+        }
+
+        f.seek(chunkDataPos + chunkSkip, SeekSet);
+    }
+
+    if (!fmtFound || !dataFound) {
+        f.close();
+        Serial.printf("\n[AUDIO] WAV header unsupported: %s", path);
+        return false;
+    }
 
     if (audioFormat != 1 || (channels != 1 && channels != 2) || bits != 16 || dataSize == 0 || (dataSize % 2) != 0) {
         f.close();
@@ -279,12 +340,18 @@ static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& ou
         return false;
     }
 
-    if ((44U + dataSize) > fileSize) {
+    if ((static_cast<size_t>(dataOffset) + static_cast<size_t>(dataSize)) > fileSize) {
         f.close();
         Serial.printf("\n[AUDIO] WAV data chunk inconsistent: %s (data=%lu, file=%lu)",
                       path,
                       static_cast<unsigned long>(dataSize),
                       static_cast<unsigned long>(fileSize));
+        return false;
+    }
+
+    if (!f.seek(dataOffset, SeekSet)) {
+        f.close();
+        Serial.printf("\n[AUDIO] WAV seek to data failed: %s", path);
         return false;
     }
 
@@ -426,21 +493,97 @@ static const char* selectFlashTestFile() {
     return nullptr;
 }
 
+static void logFlashAudioInventory() {
+    struct AssetSpec {
+        const char* path;
+        bool required;
+    };
+
+    static const AssetSpec kFlashAssets[] = {
+        { FLASH_ALARM_WAV, true },
+        { FLASH_CHIMES_WAV, true },
+        { SFX_BLE_ON, true },
+        { SFX_BLE_OFF, true },
+        { SFX_BLE_CONNECTED, true },
+        { SFX_BLE_DISCONNECTED, true },
+        { SFX_OK, true },
+        { SFX_ERROR, true },
+        { FLASH_STARTUP_GREETING_WAV, false }
+    };
+
+    size_t foundCount = 0;
+    size_t requiredMissingCount = 0;
+    size_t optionalMissingCount = 0;
+
+    for (size_t i = 0; i < (sizeof(kFlashAssets) / sizeof(kFlashAssets[0])); ++i) {
+        if (SPIFFS.exists(kFlashAssets[i].path)) {
+            foundCount += 1;
+            continue;
+        }
+
+        if (kFlashAssets[i].required) {
+            requiredMissingCount += 1;
+            Serial.printf("\n[AUDIO][FLASH][MISSING][REQ] %s", kFlashAssets[i].path);
+        } else {
+            optionalMissingCount += 1;
+            Serial.printf("\n[AUDIO][FLASH][MISSING][OPT] %s", kFlashAssets[i].path);
+        }
+    }
+
+    Serial.printf("\n[AUDIO][FLASH] WAV inventory: found %u/%u, missing required=%u, optional=%u",
+                  static_cast<unsigned>(foundCount),
+                  static_cast<unsigned>(sizeof(kFlashAssets) / sizeof(kFlashAssets[0])),
+                  static_cast<unsigned>(requiredMissingCount),
+                  static_cast<unsigned>(optionalMissingCount));
+}
+
 static void probeAudioSourcesOnStartup() {
     const bool sdMounted = ensureSdMounted(true);
     Serial.print(sdMounted ? "\n[AUDIO] microSD найдена" : "\n[AUDIO] microSD не найдена");
 
-    if (sdMounted) {
+    const bool flashReady = ensureFlashFsMounted();
+    if (!flashReady) {
+        Serial.print("\n[AUDIO][FLASH] недоступна (SPIFFS mount failed)");
         return;
     }
 
-    const bool flashReady = ensureFlashFsMounted();
-    const char* selectedFlashFile = flashReady ? selectFlashTestFile() : nullptr;
-    if (selectedFlashFile != nullptr) {
-        Serial.printf("\n[AUDIO] Внутренний WAV найден: %s", selectedFlashFile);
-    } else {
-        Serial.print("\n[AUDIO] Внутренний WAV-файл не найден, доступен тональный сигнал");
+    logFlashAudioInventory();
+}
+
+static void playStartupGreetingIfAvailable(ToneState& tone, WavStreamState& wav) {
+    if (ensureSdMounted(true)) {
+        if (SD.exists(SD_STARTUP_GREETING_WAV)) {
+            AudioCommand cmd = {
+                AudioCommandType::PlaySdFile,
+                0,
+                0,
+                0,
+                {0}
+            };
+            strlcpy(cmd.path, SD_STARTUP_GREETING_WAV, sizeof(cmd.path));
+            applyCommand(cmd, tone, wav);
+            Serial.printf("\n[AUDIO][BOOT] Приветствие: microSD %s", SD_STARTUP_GREETING_WAV);
+        } else {
+            Serial.printf("\n[AUDIO][BOOT] Приветствие не найдено на microSD: %s", SD_STARTUP_GREETING_WAV);
+        }
+        return;
     }
+
+    if (ensureFlashFsMounted() && SPIFFS.exists(FLASH_STARTUP_GREETING_WAV)) {
+        AudioCommand cmd = {
+            AudioCommandType::PlayFlashFile,
+            0,
+            0,
+            0,
+            {0}
+        };
+        strlcpy(cmd.path, FLASH_STARTUP_GREETING_WAV, sizeof(cmd.path));
+        applyCommand(cmd, tone, wav);
+        Serial.printf("\n[AUDIO][BOOT] Приветствие: Flash FS %s", FLASH_STARTUP_GREETING_WAV);
+        return;
+    }
+
+    Serial.printf("\n[AUDIO][BOOT] Приветствие не найдено: microSD отсутствует, Flash FS %s тоже отсутствует", FLASH_STARTUP_GREETING_WAV);
 }
 
 static const char* sourceName(AudioTestSource source) {
@@ -776,6 +919,8 @@ static void audioTaskEntry(void* /*param*/) {
     ToneState tone;
     WavStreamState wav;
     AudioCommand cmd;
+
+    playStartupGreetingIfAvailable(tone, wav);
 
     for (;;) {
         while (xQueueReceive(g_audioQueue, &cmd, 0) == pdTRUE) {

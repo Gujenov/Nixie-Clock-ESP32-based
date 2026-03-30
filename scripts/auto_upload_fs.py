@@ -3,7 +3,7 @@ from SCons.Script import COMMAND_LINE_TARGETS
 
 
 def _run_uploadfs_after_upload(source, target, env=None, **kwargs):
-    # Только для обычной USB-прошивки
+    # Запускаем после firmware upload (USB или OTA, если разрешено).
     if "upload" not in COMMAND_LINE_TARGETS or "uploadfs" in COMMAND_LINE_TARGETS:
         return
 
@@ -12,7 +12,10 @@ def _run_uploadfs_after_upload(source, target, env=None, **kwargs):
         return
 
     upload_protocol = str(_env.GetProjectOption("upload_protocol", "")).strip().lower()
-    if upload_protocol == "espota":
+    ota_upload_fs = str(_env.GetProjectOption("ota_upload_fs", "false")).strip().lower() in ("1", "true", "yes", "on")
+    print("[post-upload] protocol={0}, ota_upload_fs={1}".format(upload_protocol or "(empty)", ota_upload_fs))
+    if upload_protocol == "espota" and not ota_upload_fs:
+        print("[post-upload] OTA FS upload disabled (set ota_upload_fs = true to enable)")
         return
 
     python = _env.subst("$PYTHONEXE")

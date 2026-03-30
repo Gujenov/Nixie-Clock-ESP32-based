@@ -24,8 +24,6 @@ void initHardware() {
     pinMode(ENC_BTN, INPUT_PULLUP);
     
     pinMode(ALARM_BTN, INPUT_PULLUP);
-    pinMode(LIGHT_SENSOR_PIN, INPUT);
-    analogSetPinAttenuation(LIGHT_SENSOR_PIN, ADC_11db);
 
     // Линии 74HC595: сразу переводим в выход и удерживаем в лог.0
     pinMode(SR595_DATA_PIN, OUTPUT);
@@ -45,10 +43,6 @@ void initHardware() {
 
     Serial.begin(115200);
     delay(300);
-
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, HIGH);
-    
 }
 
 void setDisplayOutputEnabled(bool enabled) {
@@ -61,28 +55,17 @@ bool isDisplayOutputEnabled() {
 }
 
 uint16_t readLightSensorFiltered(uint8_t samples, uint8_t adcResolutionBits) {
-    if (samples == 0) samples = 1;
-    if (samples > 64) samples = 64;
+    (void)samples;
+    (void)adcResolutionBits;
 
-    if (adcResolutionBits < 9) adcResolutionBits = 9;
-    if (adcResolutionBits > 12) adcResolutionBits = 12;
-
-    analogReadResolution(adcResolutionBits);
-
-    uint32_t acc = 0;
-    for (uint8_t i = 0; i < samples; ++i) {
-        acc += static_cast<uint32_t>(analogRead(LIGHT_SENSOR_PIN));
-        delayMicroseconds(250);
+    // Аналоговый датчик освещенности удалён.
+    // TODO: заменить на чтение I2C-датчика (возвращать 0..1023).
+    static bool warned = false;
+    if (!warned) {
+        Serial.print("\n[LIGHT] Аналоговый датчик отключен: ожидается I2C-датчик");
+        warned = true;
     }
-
-    uint16_t avg = static_cast<uint16_t>(acc / samples);
-
-    const uint8_t shift = static_cast<uint8_t>(adcResolutionBits - 10);
-    if (shift > 0) {
-        avg = static_cast<uint16_t>(avg >> shift);
-    }
-    if (avg > 1023) avg = 1023;
-    return avg;
+    return 512;
 }
 
 void IRAM_ATTR onSQWInterrupt() {
@@ -93,6 +76,11 @@ void setupInterrupts() {
     
     // Всегда отключаем старые прерывания перед настройкой новых
     if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
+        if (rtc) {
+            rtc->writeSqwPinMode(DS3231_SquareWave1Hz);
+            rtc->disable32K();
+        }
+
         // Работаем от DS3231 - настраиваем SQW
         pinMode(SQW_PIN, INPUT_PULLUP);
         if (!sqwInterruptAttached) {
@@ -113,13 +101,10 @@ void setupInterrupts() {
 }
 
 void blinkError(int count) {
-  pinMode(LED_PIN, OUTPUT);
-  for(int i = 0; i < count; i++) {
-    digitalWrite(LED_PIN, HIGH);
-    delay(200);
-    digitalWrite(LED_PIN, LOW);
-    delay(200);
-  }
+    for(int i = 0; i < count; i++) {
+        delay(200);
+        delay(200);
+    }
 }
 
 float getDS3231Temperature() {
