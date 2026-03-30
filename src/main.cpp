@@ -20,8 +20,20 @@ extern bool printEnabled;
 static DisplayManager displayManager;
 static bool displayEditMode = false;
 static TaskHandle_t g_displayRefreshTaskHandle = nullptr;
+static volatile bool g_powerFailDetected = false;
+static volatile bool g_powerFailIrqPending = false;
+static volatile uint32_t g_powerFailIrqMicros = 0;
+static volatile uint32_t g_powerFailConfirmedMicros = 0;
+static bool g_powerFailHandled = false;
+static constexpr uint32_t POWER_FAIL_FILTER_MS = 30;
 
 static bool isAntiPoisonActive();
+static void handlePowerFailExitScenario();
+
+static void IRAM_ATTR onPowerFailInterrupt() {
+    g_powerFailIrqMicros = micros();
+    g_powerFailIrqPending = true;
+}
 
 static void onOtaTransferStartDisplayMarker() {
     if (!displayManager.supportsSoftTransition()) {
@@ -358,6 +370,10 @@ void setup() {
     setAlarmButtonCallback(onAlarmButtonEvent);
     setEncoderCallback(onEncoderEvent);
 
+    pinMode(POWER_FAIL_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(POWER_FAIL_PIN), onPowerFailInterrupt, FALLING);
+    Serial.printf("\n[PWR] IRQ detector initialized on GPIO %u (FALLING)", static_cast<unsigned>(POWER_FAIL_PIN));
+
     if (g_displayRefreshTaskHandle == nullptr) {
         BaseType_t taskOk = xTaskCreatePinnedToCore(
             displayRefreshTask,
@@ -370,9 +386,9 @@ void setup() {
         );
 
         if (taskOk == pdPASS) {
-            Serial.print("\n[DISP] Display refresh task started (core=1, prio=2)");
+            Serial.println("\n[DISP] Display refresh task started (core=1, prio=2)");
         } else {
-            Serial.print("\n[DISP][WARN] Failed to start display refresh task");
+            Serial.println("\n[DISP][WARN] Failed to start display refresh task");
             g_displayRefreshTaskHandle = nullptr;
         }
     }
@@ -399,6 +415,23 @@ void loop() {
     static unsigned long lastSQWCheck = 0;
     static bool sqwMonitorArmed = false;
     unsigned long currentMillis = millis();
+
+    if (!g_powerFailDetected && g_powerFailIrqPending) {
+        const uint32_t elapsedUs = micros() - g_powerFailIrqMicros;
+        if (elapsedUs >= (POWER_FAIL_FILTER_MS * 1000UL)) {
+            // Подтверждаем событие только если после фильтра вход стабильно LOW.
+            if (digitalRead(POWER_FAIL_PIN) == LOW) {
+                g_powerFailConfirmedMicros = micros();
+                g_powerFailDetected = true;
+            }
+            g_powerFailIrqPending = false;
+        }
+    }
+
+    if (g_powerFailDetected) {
+        handlePowerFailExitScenario();
+        return;
+    }
    
     // Обработка команд
     if (Serial.available()) {
@@ -483,6 +516,103 @@ void loop() {
     delay(10);
 }
 
+static void handlePowerFailExitScenario() {
+    if (g_powerFailHandled) {
+        for (;;) {
+            delay(1000);
+        }
+    }
+    g_powerFailHandled = true;
+
+    const uint32_t shutdownStartUs = micros();
+    const uint32_t irqToStartUs = shutdownStartUs - g_powerFailIrqMicros;
+
+    detachInterrupt(digitalPinToInterrupt(POWER_FAIL_PIN));
+
+    const uint32_t unsavedBefore = runtimeCounterGetUnsavedSeconds();
+    const uint64_t totalBefore = runtimeCounterGetTotalRunSeconds();
+
+    Serial.print("\n\n[PWR] !!! DETECTED POWER FAIL (FALLING IRQ) !!!");
+    Serial.printf("\n[PWR] runtime before save: total=%llu sec, unsaved=%lu sec",
+                  static_cast<unsigned long long>(totalBefore),
+                  static_cast<unsigned long>(unsavedBefore));
+
+    // 1) Останавливаем/деактивируем подсистемы с фоновыми задачами и активностью
+    otaDisable();
+    if (bleTerminalIsEnabled()) {
+        bleTerminalDisable();
+    }
+
+    if (g_displayRefreshTaskHandle != nullptr) {
+        vTaskDelete(g_displayRefreshTaskHandle);
+        g_displayRefreshTaskHandle = nullptr;
+        Serial.print("\n[PWR] display refresh task stopped");
+    }
+
+    if (audioTaskIsRunning()) {
+        audioTaskStop();
+    }
+
+    if (displayManager.supportsAntiPoison() && isAntiPoisonActive()) {
+        stopCathodesAntiPoisonProcedure("power fail");
+    }
+    displayManager.stopAnimations();
+    setDisplayOutputEnabled(false);
+
+    // 2) Отключаем SQW-выход DS3231 для минимизации разряда батареи
+    detachInterrupt(digitalPinToInterrupt(SQW_PIN));
+    portENTER_CRITICAL(&timerMux);
+    timeUpdatedFromSQW = false;
+    portEXIT_CRITICAL(&timerMux);
+
+    bool sqwDisabled = false;
+    if (rtc && ds3231_available) {
+        rtc->writeSqwPinMode(DS3231_OFF);
+        rtc->disable32K();
+        sqwDisabled = true;
+    }
+
+    // 3) Форс-сохранение runtime (более точное, чем периодический автосброс)
+    const bool runtimeSaved = runtimeCounterSaveNow();
+    const uint64_t totalAfter = runtimeCounterGetTotalRunSeconds();
+    const uint32_t unsavedAfter = runtimeCounterGetUnsavedSeconds();
+
+    Serial.printf("\n[PWR] DS3231 SQW OFF: %s", sqwDisabled ? "OK" : "SKIPPED");
+    Serial.printf("\n[PWR] runtime save: %s", runtimeSaved ? "OK" : "FAIL");
+    Serial.printf("\n[PWR] runtime after save: total=%llu sec, unsaved=%lu sec",
+                  static_cast<unsigned long long>(totalAfter),
+                  static_cast<unsigned long>(unsavedAfter));
+
+    const uint32_t shutdownDoneUs = micros();
+    const uint32_t irqToDoneUs = shutdownDoneUs - g_powerFailIrqMicros;
+    const uint32_t confirmToDoneUs = (g_powerFailConfirmedMicros == 0)
+                                         ? 0
+                                         : (shutdownDoneUs - g_powerFailConfirmedMicros);
+
+    Serial.printf("\n[PWR][TIMING] IRQ->start: %lu us (%.3f ms)",
+                  static_cast<unsigned long>(irqToStartUs),
+                  irqToStartUs / 1000.0f);
+    if (g_powerFailConfirmedMicros != 0) {
+        const uint32_t irqToConfirmUs = g_powerFailConfirmedMicros - g_powerFailIrqMicros;
+        Serial.printf("\n[PWR][TIMING] IRQ->confirm: %lu us (%.3f ms)",
+                      static_cast<unsigned long>(irqToConfirmUs),
+                      irqToConfirmUs / 1000.0f);
+        Serial.printf("\n[PWR][TIMING] confirm->done: %lu us (%.3f ms)",
+                      static_cast<unsigned long>(confirmToDoneUs),
+                      confirmToDoneUs / 1000.0f);
+    }
+    Serial.printf("\n[PWR][TIMING] IRQ->done: %lu us (%.3f ms)",
+                  static_cast<unsigned long>(irqToDoneUs),
+                  irqToDoneUs / 1000.0f);
+    Serial.print("\n[PWR] entering terminal loop");
+    Serial.flush();
+
+    // 4) Завершаем выполнение
+    for (;;) {
+        delay(1000);
+    }
+}
+
 void processSecondTick() {
     static bool tickUtcInitialized = false;
     static bool lastDsState = false;
@@ -507,23 +637,6 @@ void processSecondTick() {
     }
 
     runtimeCounterOnSecondTick();
-
-    // Контрольная сверка строго в 00 секунд каждых 5 минут: 00, 05, 10, ...
-    // Источник сверки = текущий активный источник времени (DS3231 или System RTC)
-    struct tm tickUtcTm;
-    gmtime_r(&tickUtc, &tickUtcTm);
-    if (tickUtcTm.tm_sec == 0 && (tickUtcTm.tm_min % 5) == 0 && tickUtc != lastFiveMinuteSyncMarkUtc) {
-        tickUtc = getCurrentUTCTime();
-        lastFiveMinuteSyncMarkUtc = tickUtc;
-
-        if (printEnabled) {
-            if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
-                Serial.print("\n[DS3231] RTC time read");
-            } else {
-                Serial.print("\n[RTC] RTC time read");
-            }
-        }
-    }
 
     time_t currentTime = tickUtc;
     time_t localTime = utcToLocal(currentTime);
@@ -557,8 +670,6 @@ void processSecondTick() {
             lastAntiPoisonHourMarker = hourMarker;
         }
     }
-
-    chimeSchedulerOnTick(local_tm_info);
 
     const bool displayShouldBeEnabled = displayActiveNow || isAntiPoisonActive();
     if (!displayStateInitialized) {
@@ -606,6 +717,9 @@ void processSecondTick() {
                                            config.alarm2.hour, config.alarm2.minute);
     }
 
+    // Неблокирующие небезусловные действия — после коммита кадра секунды.
+    chimeSchedulerOnTick(local_tm_info);
+
     const DisplayDebugInfo dispDbg = displayManager.getDebugInfo();
     
     // Индикация работы
@@ -635,7 +749,32 @@ void processSecondTick() {
         }
     }
     
-    checkAlarms();
+    checkAlarmsAtTick(currentTime, local_tm_info);
+
+    // Контрольная сверка строго в 00 секунд каждых 5 минут: 00, 05, 10, ...
+    // ВАЖНО: делаем после обновления кадра секунды, чтобы SQW->display задержка
+    // оставалась максимально стабильной и не зависела от I2C операций.
+    // Источник сверки = текущий активный источник времени (DS3231 или System RTC)
+    struct tm tickUtcTm;
+    gmtime_r(&currentTime, &tickUtcTm);
+    if (tickUtcTm.tm_sec == 0 && (tickUtcTm.tm_min % 5) == 0 && currentTime != lastFiveMinuteSyncMarkUtc) {
+        const time_t checkedUtc = getCurrentUTCTime();
+        lastFiveMinuteSyncMarkUtc = currentTime;
+
+        // Применяем корректировку в базу тика уже ПОСЛЕ коммита текущего кадра,
+        // чтобы не менять отображаемую секунду в этом проходе.
+        if (checkedUtc > 0) {
+            tickUtc = checkedUtc;
+        }
+
+        if (printEnabled) {
+            if (currentTimeSource == EXTERNAL_DS3231 && ds3231_available) {
+                Serial.print("\n[DS3231] RTC time read");
+            } else {
+                Serial.print("\n[RTC] RTC time read");
+            }
+        }
+    }
     
     // Синхронизация
     static uint8_t lastSyncHour = 255;

@@ -283,6 +283,7 @@ void printConfigMenu() {
     Serial.printf("  • Ручное управление: %s\n", platformUiControlModeName(config.ui_control_mode));
     Serial.printf("  • Громкость будильника: %u%%\n", static_cast<unsigned>(config.alarm_volume));
     Serial.printf("  • Громкость боя: %u%%\n", static_cast<unsigned>(config.chime_volume));
+    Serial.printf("  • Громкость уведомлений: %u%%\n", static_cast<unsigned>(config.notification_volume));
     Serial.printf("  • Бой в час: %u\n", static_cast<unsigned>(config.chimes_per_hour));
     Serial.printf("  • Активность боя: %u-%u\n",
                   static_cast<unsigned>(config.chime_active_start_hour),

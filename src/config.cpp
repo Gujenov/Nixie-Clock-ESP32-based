@@ -48,6 +48,7 @@ struct ConfigLegacyV1 {
 void applyNewUserSettingsDefaults() {
   config.alarm_volume = 50;
   config.chime_volume = 50;
+  config.notification_volume = 50;
   config.chimes_per_hour = 1;
   config.chime_active_start_hour = 0;
   config.chime_active_end_hour = 24;
@@ -241,6 +242,7 @@ void initConfiguration() {
 
   if (config.alarm_volume > 100) config.alarm_volume = 50;
   if (config.chime_volume > 100) config.chime_volume = 50;
+  if (config.notification_volume > 100) config.notification_volume = 50;
   if (!(config.chimes_per_hour == 0 || config.chimes_per_hour == 1 || config.chimes_per_hour == 2 || config.chimes_per_hour == 4)) {
     config.chimes_per_hour = 1;
   }
@@ -399,6 +401,7 @@ void setDefaultConfig() {
 
     config.alarm_volume = 50;
     config.chime_volume = 50;
+    config.notification_volume = 50;
     config.chimes_per_hour = 1;
     config.chime_active_start_hour = 0;
     config.chime_active_end_hour = 24;
