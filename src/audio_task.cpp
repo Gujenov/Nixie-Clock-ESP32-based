@@ -69,10 +69,8 @@ struct WavStreamState {
 static constexpr char FLASH_ALARM_WAV[] = "/alarm_default.wav";
 static constexpr char FLASH_CHIMES_WAV[] = "/sfx_himes.wav";
 static constexpr char FLASH_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
-static constexpr char FLASH_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SD_CHIME_HOUR_WAV[] = "/chime_hour.wav";
 static constexpr char SD_CHIME_QUARTER_WAV[] = "/chime_quarter.wav";
-static constexpr char SD_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SD_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
 static constexpr char SFX_BLE_OFF[] = "/sfx_ble_off.wav";
@@ -91,6 +89,8 @@ static bool g_sdReady = false;
 static uint32_t g_lastSdProbeMs = 0;
 static AudioTestSource g_lastTestSource = AudioTestSource::None;
 static SPIClass g_sdSpi(FSPI);
+
+static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamState& wav);
 
 static void invalidateSdMount(const char* reason = nullptr) {
     if (reason && reason[0] != '\0') {
@@ -250,24 +250,26 @@ static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& ou
     }
 
     const size_t fileSize = static_cast<size_t>(f.size());
-    if (fileSize < 12) {
+    if (fileSize < 44) {
         f.close();
         Serial.printf("\n[AUDIO] WAV too small: %s (%lu bytes)", path, static_cast<unsigned long>(fileSize));
         return false;
     }
 
-    uint8_t riff[12] = {0};
-    if (f.read(riff, sizeof(riff)) != sizeof(riff)) {
+    uint8_t header[44] = {0};
+    if (f.read(header, sizeof(header)) != sizeof(header)) {
         f.close();
         Serial.printf("\n[AUDIO] WAV header read failed: %s", path);
         return false;
     }
 
-    const bool riffOk = std::memcmp(riff + 0, "RIFF", 4) == 0;
-    const bool waveOk = std::memcmp(riff + 8, "WAVE", 4) == 0;
-    if (!riffOk || !waveOk) {
+    const bool riffOk = std::memcmp(header + 0, "RIFF", 4) == 0;
+    const bool waveOk = std::memcmp(header + 8, "WAVE", 4) == 0;
+    const bool fmtOk = std::memcmp(header + 12, "fmt ", 4) == 0;
+    const bool dataOk = std::memcmp(header + 36, "data", 4) == 0;
+    if (!riffOk || !waveOk || !fmtOk || !dataOk) {
         f.close();
-        Serial.printf("\n[AUDIO] WAV header unsupported: %s", path);
+        Serial.printf("\n[AUDIO] WAV header unsupported/corrupted: %s", path);
         return false;
     }
 
@@ -281,11 +283,12 @@ static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& ou
                (static_cast<uint32_t>(p[3]) << 24);
     };
 
-    const uint16_t audioFormat = rd16(20);
-    const uint16_t channels = rd16(22);
-    const uint32_t sampleRate = rd32(24);
-    const uint16_t bits = rd16(34);
-    const uint32_t dataSize = rd32(40);
+    const uint16_t audioFormat = rd16(header + 20);
+    const uint16_t channels = rd16(header + 22);
+    const uint32_t sampleRate = rd32(header + 24);
+    const uint16_t bits = rd16(header + 34);
+    const uint32_t dataSize = rd32(header + 40);
+    const uint32_t dataOffset = 44;
 
     if (audioFormat != 1 || (channels != 1 && channels != 2) || bits != 16 || dataSize == 0 || (dataSize % 2) != 0) {
         f.close();
@@ -500,12 +503,76 @@ static void probeAudioSourcesOnStartup() {
         return;
     }
 
-    const bool flashReady = ensureFlashFsMounted();
     const char* selectedFlashFile = flashReady ? selectFlashTestFile() : nullptr;
     if (selectedFlashFile != nullptr) {
         Serial.printf("\n[AUDIO] Внутренний WAV найден: %s", selectedFlashFile);
     } else {
         Serial.print("\n[AUDIO] Внутренний WAV-файл не найден, доступен тональный сигнал");
+    }
+
+    logFlashAudioInventory();
+}
+
+static uint8_t clampVolumePercent(uint8_t v) {
+    return (v > 100U) ? 100U : v;
+}
+
+static uint8_t resolveVolumePercent(const AudioCommand& cmd) {
+    switch (cmd.volumeProfile) {
+        case AudioVolumeProfile::Notification:
+            return clampVolumePercent(config.notification_volume);
+        case AudioVolumeProfile::Alarm:
+            return clampVolumePercent(config.alarm_volume);
+        case AudioVolumeProfile::Chime:
+            return clampVolumePercent(config.chime_volume);
+        case AudioVolumeProfile::Fixed:
+        default:
+            return clampVolumePercent(cmd.fixedVolumePercent);
+    }
+}
+
+static void applyVolumeToInterleavedBuffer(int16_t* samples, size_t sampleCount, uint8_t volumePercent) {
+    if (!samples || sampleCount == 0) {
+        return;
+    }
+
+    const uint16_t vol = clampVolumePercent(volumePercent);
+    if (vol >= 100U) {
+        return;
+    }
+
+    for (size_t i = 0; i < sampleCount; ++i) {
+        const int32_t scaled = (static_cast<int32_t>(samples[i]) * static_cast<int32_t>(vol)) / 100;
+        samples[i] = static_cast<int16_t>(scaled);
+    }
+}
+
+static void playStartupGreetingIfAvailable(ToneState& tone, WavStreamState& wav) {
+    if (!platformGetCapabilities().sound_enabled) {
+        return;
+    }
+
+    AudioCommand cmd = {
+        AudioCommandType::PlayFlashFile,
+        AudioVolumeProfile::Notification,
+        100,
+        0,
+        0,
+        0,
+        {0}
+    };
+
+    if (ensureSdMounted(true) && SD.exists(SD_STARTUP_GREETING_WAV)) {
+        cmd.type = AudioCommandType::PlaySdFile;
+        strlcpy(cmd.path, SD_STARTUP_GREETING_WAV, sizeof(cmd.path));
+        applyCommand(cmd, tone, wav);
+        return;
+    }
+
+    if (ensureFlashFsMounted() && SPIFFS.exists(FLASH_STARTUP_GREETING_WAV)) {
+        cmd.type = AudioCommandType::PlayFlashFile;
+        strlcpy(cmd.path, FLASH_STARTUP_GREETING_WAV, sizeof(cmd.path));
+        applyCommand(cmd, tone, wav);
     }
 }
 
