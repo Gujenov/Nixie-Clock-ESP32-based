@@ -28,6 +28,10 @@
 #define SD_SPI_MOSI_PIN 17
 #define SD_SPI_MISO_PIN 16
 #define SD_SPI_CS_PIN 15
+#define SD_SPI_SCK_PIN 18
+#define SD_SPI_MOSI_PIN 17
+#define SD_SPI_MISO_PIN 16
+#define SD_SPI_CS_PIN 15
 
 // Настройки таймера
 #define TIMER_DIVIDER 80

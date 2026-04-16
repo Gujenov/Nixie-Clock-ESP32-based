@@ -69,8 +69,10 @@ struct WavStreamState {
 static constexpr char FLASH_ALARM_WAV[] = "/alarm_default.wav";
 static constexpr char FLASH_CHIMES_WAV[] = "/sfx_himes.wav";
 static constexpr char FLASH_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
+static constexpr char FLASH_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SD_CHIME_HOUR_WAV[] = "/chime_hour.wav";
 static constexpr char SD_CHIME_QUARTER_WAV[] = "/chime_quarter.wav";
+static constexpr char SD_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SD_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
 static constexpr char SFX_BLE_OFF[] = "/sfx_ble_off.wav";
@@ -89,50 +91,6 @@ static bool g_sdReady = false;
 static uint32_t g_lastSdProbeMs = 0;
 static AudioTestSource g_lastTestSource = AudioTestSource::None;
 static SPIClass g_sdSpi(FSPI);
-
-static void applyCommand(const AudioCommand& cmd, ToneState& tone, WavStreamState& wav);
-
-static uint8_t clampVolumePercent(uint8_t value) {
-    return (value > 100U) ? 100U : value;
-}
-
-static uint8_t resolveVolumePercent(const AudioCommand& cmd) {
-    switch (cmd.volumeProfile) {
-        case AudioVolumeProfile::Alarm:
-            return clampVolumePercent(config.alarm_volume);
-        case AudioVolumeProfile::Chime:
-            return clampVolumePercent(config.chime_volume);
-        case AudioVolumeProfile::Notification:
-            return clampVolumePercent(config.notification_volume);
-        case AudioVolumeProfile::Fixed:
-        default:
-            return clampVolumePercent(cmd.fixedVolumePercent);
-    }
-}
-
-static inline int16_t applyVolumeToSample(int16_t sample, uint8_t volumePercent) {
-    if (volumePercent >= 100U) {
-        return sample;
-    }
-    if (volumePercent == 0U) {
-        return 0;
-    }
-
-    const int32_t scaled = (static_cast<int32_t>(sample) * static_cast<int32_t>(volumePercent)) / 100;
-    if (scaled > 32767) return 32767;
-    if (scaled < -32768) return -32768;
-    return static_cast<int16_t>(scaled);
-}
-
-static void applyVolumeToInterleavedBuffer(int16_t* samples, size_t sampleCount, uint8_t volumePercent) {
-    if (!samples || sampleCount == 0 || volumePercent >= 100U) {
-        return;
-    }
-
-    for (size_t i = 0; i < sampleCount; ++i) {
-        samples[i] = applyVolumeToSample(samples[i], volumePercent);
-    }
-}
 
 static void invalidateSdMount(const char* reason = nullptr) {
     if (reason && reason[0] != '\0') {
@@ -323,85 +281,11 @@ static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& ou
                (static_cast<uint32_t>(p[3]) << 24);
     };
 
-    bool fmtFound = false;
-    bool dataFound = false;
-    uint16_t audioFormat = 0;
-    uint16_t channels = 0;
-    uint32_t sampleRate = 0;
-    uint16_t bits = 0;
-    uint32_t dataSize = 0;
-    uint32_t dataOffset = 0;
-
-    while (f.available()) {
-        uint8_t chunkHdr[8] = {0};
-        if (f.read(chunkHdr, sizeof(chunkHdr)) != sizeof(chunkHdr)) {
-            break;
-        }
-
-        const uint32_t chunkSize = rd32(chunkHdr + 4);
-        const uint32_t chunkDataPos = static_cast<uint32_t>(f.position());
-        const uint32_t chunkSkip = chunkSize + (chunkSize & 1U);
-
-        if (std::memcmp(chunkHdr, "fmt ", 4) == 0) {
-            if (chunkSize < 16) {
-                f.close();
-                Serial.printf("\n[AUDIO] WAV fmt chunk too small: %s", path);
-                return false;
-            }
-
-            uint8_t fmt16[16] = {0};
-            if (f.read(fmt16, sizeof(fmt16)) != sizeof(fmt16)) {
-                f.close();
-                Serial.printf("\n[AUDIO] WAV fmt chunk read failed: %s", path);
-                return false;
-            }
-
-            audioFormat = rd16(fmt16 + 0);
-            channels = rd16(fmt16 + 2);
-            sampleRate = rd32(fmt16 + 4);
-            bits = rd16(fmt16 + 14);
-            fmtFound = true;
-
-            if (chunkSize > 16) {
-                f.seek(chunkDataPos + chunkSkip, SeekSet);
-            }
-            continue;
-        }
-
-        if (std::memcmp(chunkHdr, "data", 4) == 0) {
-            dataSize = chunkSize;
-            dataOffset = chunkDataPos;
-            dataFound = true;
-            if (fmtFound) {
-                break;
-            }
-            f.seek(chunkDataPos + chunkSkip, SeekSet);
-            continue;
-        }
-
-        f.seek(chunkDataPos + chunkSkip, SeekSet);
-    }
-
-    if (!fmtFound || !dataFound) {
-        f.close();
-        Serial.printf("\n[AUDIO] WAV header unsupported: %s", path);
-        return false;
-    }
-
-    auto isSupportedI2SSampleRate = [](uint32_t rate) -> bool {
-        switch (rate) {
-            case 8000:
-            case 16000:
-            case 32000:
-            case 44100:
-            case 48000:
-            case 88200:
-            case 96000:
-                return true;
-            default:
-                return false;
-        }
-    };
+    const uint16_t audioFormat = rd16(20);
+    const uint16_t channels = rd16(22);
+    const uint32_t sampleRate = rd32(24);
+    const uint16_t bits = rd16(34);
+    const uint32_t dataSize = rd32(40);
 
     if (audioFormat != 1 || (channels != 1 && channels != 2) || bits != 16 || dataSize == 0 || (dataSize % 2) != 0) {
         f.close();
@@ -409,15 +293,7 @@ static bool openWavStreamFromFs(fs::FS& fs, const char* path, WavStreamState& ou
         return false;
     }
 
-    if (!isSupportedI2SSampleRate(sampleRate)) {
-        f.close();
-        Serial.printf("\n[AUDIO] WAV sample rate unsupported for MAX98357 I2S LRCLK: %s (%lu Hz); allowed: 8k/16k/32k/44.1k/48k/88.2k/96k",
-                      path,
-                      static_cast<unsigned long>(sampleRate));
-        return false;
-    }
-
-    if ((static_cast<size_t>(dataOffset) + static_cast<size_t>(dataSize)) > fileSize) {
+    if ((44U + dataSize) > fileSize) {
         f.close();
         Serial.printf("\n[AUDIO] WAV data chunk inconsistent: %s (data=%lu, file=%lu)",
                       path,
@@ -624,47 +500,13 @@ static void probeAudioSourcesOnStartup() {
         return;
     }
 
-    logFlashAudioInventory();
-}
-
-static void playStartupGreetingIfAvailable(ToneState& tone, WavStreamState& wav) {
-    if (ensureSdMounted(true)) {
-        if (SD.exists(SD_STARTUP_GREETING_WAV)) {
-            AudioCommand cmd = {
-                AudioCommandType::PlaySdFile,
-                AudioVolumeProfile::Notification,
-                100,
-                0,
-                0,
-                0,
-                {0}
-            };
-            strlcpy(cmd.path, SD_STARTUP_GREETING_WAV, sizeof(cmd.path));
-            applyCommand(cmd, tone, wav);
-            Serial.printf("\n[AUDIO][BOOT] Приветствие: microSD %s", SD_STARTUP_GREETING_WAV);
-        } else {
-            Serial.printf("\n[AUDIO][BOOT] Приветствие не найдено на microSD: %s", SD_STARTUP_GREETING_WAV);
-        }
-        return;
+    const bool flashReady = ensureFlashFsMounted();
+    const char* selectedFlashFile = flashReady ? selectFlashTestFile() : nullptr;
+    if (selectedFlashFile != nullptr) {
+        Serial.printf("\n[AUDIO] Внутренний WAV найден: %s", selectedFlashFile);
+    } else {
+        Serial.print("\n[AUDIO] Внутренний WAV-файл не найден, доступен тональный сигнал");
     }
-
-    if (ensureFlashFsMounted() && SPIFFS.exists(FLASH_STARTUP_GREETING_WAV)) {
-        AudioCommand cmd = {
-            AudioCommandType::PlayFlashFile,
-            AudioVolumeProfile::Notification,
-            100,
-            0,
-            0,
-            0,
-            {0}
-        };
-        strlcpy(cmd.path, FLASH_STARTUP_GREETING_WAV, sizeof(cmd.path));
-        applyCommand(cmd, tone, wav);
-        Serial.printf("\n[AUDIO][BOOT] Приветствие: Flash FS %s", FLASH_STARTUP_GREETING_WAV);
-        return;
-    }
-
-    Serial.printf("\n[AUDIO][BOOT] Приветствие не найдено: microSD отсутствует, Flash FS %s тоже отсутствует", FLASH_STARTUP_GREETING_WAV);
 }
 
 static const char* sourceName(AudioTestSource source) {
