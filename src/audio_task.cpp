@@ -67,9 +67,9 @@ struct WavStreamState {
 };
 
 static constexpr char FLASH_ALARM_WAV[] = "/alarm_default.wav";
-static constexpr char FLASH_CHIMES_WAV[] = "/sfx_himes.wav";
+static constexpr char FLASH_CHIMES_WAV[] = "/sfx_hourly_bell.wav";
 static constexpr char FLASH_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
-static constexpr char SD_CHIME_HOUR_WAV[] = "/chime_hour.wav";
+static constexpr char SD_CHIME_HOUR_WAV[] = "/chime_hourly_bell.wav";
 static constexpr char SD_CHIME_QUARTER_WAV[] = "/chime_quarter.wav";
 static constexpr char SD_STARTUP_GREETING_WAV[] = "/startup_greeting.wav";
 static constexpr char SFX_BLE_ON[] = "/sfx_ble_on.wav";
@@ -494,8 +494,13 @@ static void logFlashAudioInventory() {
 }
 
 static void probeAudioSourcesOnStartup() {
-    const bool sdMounted = ensureSdMounted(true);
-    Serial.print(sdMounted ? "\n[AUDIO] microSD найдена" : "\n[AUDIO] microSD не найдена");
+    constexpr bool kProbeSdOnStartup = false;
+    if (kProbeSdOnStartup) {
+        const bool sdMounted = ensureSdMounted(true);
+        Serial.print(sdMounted ? "\n[AUDIO] microSD найдена" : "\n[AUDIO] microSD не найдена");
+    } else {
+        Serial.print("\n[AUDIO] microSD startup-probe пропущен");
+    }
 
     const bool flashReady = ensureFlashFsMounted();
     if (!flashReady) {
@@ -930,7 +935,9 @@ static void audioTaskEntry(void* /*param*/) {
     WavStreamState wav;
     AudioCommand cmd;
 
-    playStartupGreetingIfAvailable(tone, wav);
+    if (config.startup_sound_enabled) {
+        playStartupGreetingIfAvailable(tone, wav);
+    }
 
     for (;;) {
         while (xQueueReceive(g_audioQueue, &cmd, 0) == pdTRUE) {
@@ -1252,8 +1259,8 @@ static bool playChimeByPathWithFallback(const char* sdPath, const char* chimeLab
     return false;
 }
 
-bool audioPlayChimeHourly() {
-    return playChimeByPathWithFallback(SD_CHIME_HOUR_WAV, "hourly");
+bool audioPlayChimeHourlyBell() {
+    return playChimeByPathWithFallback(SD_CHIME_HOUR_WAV, "hourly_bell");
 }
 
 bool audioPlayChimeQuarter() {

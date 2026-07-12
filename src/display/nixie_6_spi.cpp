@@ -129,7 +129,10 @@ void Nixie6SpiDriver::begin() {
     digitalWrite(mosiPin_, LOW);
 
     if (USE_HARDWARE_SPI) {
-        g_displaySpi.begin(sckPin_, -1, mosiPin_, latchPin_);
+        // Для ESP32-S3 у HSPI нет "дефолтных" пинов, поэтому нельзя оставлять MISO = -1,
+        // иначе драйвер пытается подключить несуществующий default MISO и печатает ошибку.
+        // Индикация write-only, MISO не используется: задаём любой валидный GPIO-вход.
+        g_displaySpi.begin(sckPin_, SD_SPI_MISO_PIN, mosiPin_, latchPin_);
         g_displaySpiReady = true;
     }
 

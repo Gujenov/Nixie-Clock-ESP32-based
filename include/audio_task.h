@@ -36,7 +36,7 @@ bool audioPlaySfx(AudioSfxId id);
 AudioStartStatus audioPlayFromFlashTest();
 AudioStartStatus audioPlayFromSdTest();
 bool audioPlayAlarmMelody(uint8_t melodyNumber);
-bool audioPlayChimeHourly();
+bool audioPlayChimeHourlyBell();
 bool audioPlayChimeQuarter();
 void audioStopPlayback();
 bool audioIsPlaying();

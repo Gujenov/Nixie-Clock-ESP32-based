@@ -61,7 +61,7 @@ static void scheduleChime(PendingChimeType type, uint8_t repeats) {
     pendingChime.type = type;
     pendingChime.repeatsRemaining = repeats;
     Serial.printf("[AUDIO][BELL] Запланировано: type=%s, repeats=%u\n",
-                  type == PendingChimeType::Hourly ? "hourly" : "quarter",
+                  type == PendingChimeType::Hourly ? "hourly_bell" : "quarter",
                   static_cast<unsigned>(repeats));
 }
 
@@ -95,7 +95,7 @@ void chimeSchedulerService() {
 
     bool started = false;
     if (pendingChime.type == PendingChimeType::Hourly) {
-        started = audioPlayChimeHourly();
+        started = audioPlayChimeHourlyBell();
     } else if (pendingChime.type == PendingChimeType::Quarter) {
         started = audioPlayChimeQuarter();
     }

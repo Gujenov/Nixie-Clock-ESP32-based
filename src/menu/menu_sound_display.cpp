@@ -189,6 +189,7 @@ void printDisplayMenu() {
         Serial.printf("\n║ Громк. уведомлений:   %3u%%", static_cast<unsigned>(config.notification_volume));
         Serial.printf("\n║ Бой в час:            %u", static_cast<unsigned>(config.chimes_per_hour));
         Serial.printf("\n║ Активность боя:       %u-%u", static_cast<unsigned>(config.chime_active_start_hour), static_cast<unsigned>(config.chime_active_end_hour));
+        Serial.printf("\n║ Приветствие:          %s", config.startup_sound_enabled ? "on" : "off");
     } else {
         Serial.print("\n║ Звуковая подсистема отключена в инженерном меню");
     }
@@ -215,6 +216,8 @@ void printDisplayMenu() {
         Serial.println("\nНастройка боя:");
         Serial.println("  bells per hour / bph 0|1|2|4        - 4=четвертной, 2=половинный, 1=часовой, 0=выкл");
         Serial.println("  bells time activity / bta HH-HH     - Активность боя (полуинтервал [start,end))");
+        Serial.println("\nПриветственная мелодия:");
+        Serial.println("  start_sound on/off                     - Вкл/выкл приветственную мелодию при старте");
     } else {
         Serial.println("\nЗвуковая подсистема отключена в инженерном меню. Команды настройки звука недоступны.");
     }
@@ -349,6 +352,31 @@ void handleDisplayMenu(String command) {
             config.brightness_control_enabled = true;
             saveConfig();
             Serial.println("Управление яркостью: ВКЛЮЧЕНО");
+            printDisplayMenu();
+            return;
+        }
+
+        if (lower.startsWith("start_sound ") || lower.equals("start_sound on") || lower.equals("start_sound off")) {
+            String arg;
+            if (lower.startsWith("start_sound ")) {
+                arg = lower.substring(12);
+            } else if (lower.equals("start_sound on")) {
+                arg = "on";
+            } else if (lower.equals("start_sound off")) {
+                arg = "off";
+            }
+            arg.trim();
+            if (arg.equals("on")) {
+                config.startup_sound_enabled = true;
+                saveConfig();
+                Serial.println("Приветствие: on");
+            } else if (arg.equals("off")) {
+                config.startup_sound_enabled = false;
+                saveConfig();
+                Serial.println("Приветствие: off");
+            } else {
+                Serial.println("Неверный аргумент. Используйте: start_sound on  или start_sound off");
+            }
             printDisplayMenu();
             return;
         }

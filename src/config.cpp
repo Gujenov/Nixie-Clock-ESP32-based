@@ -67,6 +67,7 @@ void applyNewUserSettingsDefaults() {
 
   config.light_filter_samples = 8;
   config.light_sensor_resolution_bits = 10;
+  config.startup_sound_enabled = true;
 }
 
 } // namespace
@@ -271,6 +272,13 @@ void initConfiguration() {
     config.light_sensor_resolution_bits = 10;
   }
 
+  // Если конфигурация была старой (меньше текущего размера структуры),
+  // гарантийно задаём новое поле `startup_sound_enabled` и сохраняем.
+  if (stored_size == 0 || stored_size < sizeof(config)) {
+    config.startup_sound_enabled = true;
+    saveConfig();
+  }
+
   platformRefreshCapabilities();
   initNTPClient();
 }
@@ -402,6 +410,7 @@ void setDefaultConfig() {
     config.alarm_volume = 50;
     config.chime_volume = 50;
     config.notification_volume = 50;
+    config.startup_sound_enabled = true;
     config.chimes_per_hour = 1;
     config.chime_active_start_hour = 0;
     config.chime_active_end_hour = 24;

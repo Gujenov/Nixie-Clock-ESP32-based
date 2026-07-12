@@ -1,9 +1,4 @@
 MCU.HW_VARIANT.RELEASE_TYPE.BUILD
-set time 11:59:58
-ST 13:08:11
-
-set date 01.02.2026
-SD 01.02.2028
 
 ### Структура:
 - **MCU** (1 символ) - семейство контроллера

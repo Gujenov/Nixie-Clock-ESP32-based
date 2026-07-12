@@ -105,6 +105,13 @@ static void printHardwareMenu() {
     Serial.printf("\n║ Аудио/будильник: %s", config.audio_module_enabled ? "Есть" : "Нет");
     Serial.printf("\n║ IR датчик движения: %s", config.ir_sensor_enabled ? "Есть" : "Нет");
     Serial.printf("\n║ Управление: %s", getUiControlModeName(config.ui_control_mode));
+    const bool nixieClockType = (config.clock_type == CLOCK_TYPE_NIXIE ||
+                                 config.clock_type == CLOCK_TYPE_NIXIE_HAND);
+    if (nixieClockType) {
+        Serial.printf("\n║ Мягкая смена цифр: %s", nixie6IsSoftTransitionEnabled() ? "Вкл" : "Выкл");
+    } else {
+        Serial.printf("\n║ Мягкая смена цифр: Недоступно");
+    }
     Serial.print("\n╚═══════════════════════════════════════════════════════\n\n");
     
     Serial.println("1  Nix <кол-во>  - Nixie clock (1,2,4,6 разрядов)");

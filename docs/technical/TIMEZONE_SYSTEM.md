@@ -83,7 +83,7 @@ struct TimeConfig {
 
 ## Таблица часовых поясов
 
-В файле [timezone_manager.cpp](src/timezone_manager.cpp) определён массив:
+В файле [timezone_manager.cpp](../src/timezone_manager.cpp) определён массив:
 
 ```cpp
 static const TimezonePreset TIMEZONE_PRESETS[] = {
@@ -227,7 +227,7 @@ Serial.printf("UTC%+d, DST: %s\n",
 
 ### Добавление нового пояса
 
-Редактируем [timezone_manager.cpp](src/timezone_manager.cpp), добавляем в массив:
+Редактируем [timezone_manager.cpp](../src/timezone_manager.cpp), добавляем в массив:
 
 ```cpp
 {"Asia/Dubai", "Дубай (GST)", 4, 4, 0, 0, 0, 0, 0, 0, 0, 0},  // Без DST
@@ -311,7 +311,7 @@ A: При каждом вызове `utcToLocal()` - статус вычисля
 A: Нет, `current_dst_active` вычисляется автоматически при каждой конвертации времени.
 
 **Q: Что делать, если правила DST изменились?**  
-A: Обновить таблицу `TIMEZONE_PRESETS[]` в [timezone_manager.cpp](src/timezone_manager.cpp) и перепрошить устройство.
+A: Обновить таблицу `TIMEZONE_PRESETS[]` в [timezone_manager.cpp](../src/timezone_manager.cpp) и перепрошить устройство.
 
 ## Производительность
 
@@ -332,3 +332,8 @@ A: Обновить таблицу `TIMEZONE_PRESETS[]` в [timezone_manager.cpp
 - ❌ Ручное управление DST пользователем
 - ❌ Автоопределение смещения (проблемы с VPN)
 - ❌ Отсутствие fallback при недоступности ezTime
+
+## Связанные файлы
+- `include/timezone_manager.h`
+- `src/timezone_manager.cpp`
+- `include/config.h`
