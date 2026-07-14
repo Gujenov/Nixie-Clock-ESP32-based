@@ -32,7 +32,9 @@ COM6, 115200 бод
 > ota status
 ```
 
-Видите статус OTA (должно быть ENABLED).
+Видите статус OTA (`[OTA] ON, окно: NNN сек`).
+
+> **Важно про тайминги OTA.** Вход в инженерное меню (`em`) открывает окно OTA на **1 час**. Ручная команда `ota on` открывает окно только на **5 минут** (значение `OTA_WINDOW_MS` по умолчанию). Проверить остаток окна можно командой `ota status`.
 
 ## OTA-обновление
 
@@ -79,6 +81,5 @@ em (вход)
 ## Подробнее
 
 - `docs/ONBOARDING_AND_OTA.md` — детальное руководство
- - `docs/ONBOARDING_AND_OTA.md` — детальное руководство
  - [technical/ENGINEERING_MENU.md](technical/ENGINEERING_MENU.md) — описание всех команд инженера
  - [technical/MENU_COMMANDS_STRUCTURE.md](technical/MENU_COMMANDS_STRUCTURE.md) — полное дерево команд

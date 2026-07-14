@@ -10,7 +10,7 @@
 - `src/menu/menu_manager.cpp`
 - `src/menu/menu_wifi_ntp.cpp`
 - `src/menu/menu_sound_display.cpp`
-- `src/menu/menu_display_wifi.cpp`
+- `src/menu/menu_info_config.cpp`
 - `src/command_handler.cpp`
 
 ## Модель состояния меню
@@ -141,4 +141,4 @@ graph TD
 - `src/command_handler.cpp`
 - `src/menu/menu_wifi_ntp.cpp`
 - `src/menu/menu_sound_display.cpp`
-- `src/menu/menu_display_wifi.cpp`
+- `src/menu/menu_info_config.cpp`
