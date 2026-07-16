@@ -1,0 +1,28 @@
+
+
+**The sounds loaded onto the SD card for service functions and alarm execution should be formatted as follows:**
+
+1. Only **.WAV** file format is acceptable.
+2. The bitrate can vary, but must not exceed **44100 Hz**. Mono or stereo formats are both supported.
+3. File naming and their purposes are described below.
+
+---
+
+**Alarm processing**
+- `alarm_default.wav` – default alarm sound. It will be played if no other alarm file is found.
+
+**Bluetooth service**
+- `sfx_ble_on.wav` – Bluetooth ON
+- `sfx_ble_off.wav` – Bluetooth OFF
+- `sfx_ble_connected.wav` – Bluetooth connected
+- `sfx_ble_disconnected.wav` – Bluetooth disconnected
+
+**System**
+- `sfx_ok.wav` – confirmation of an action, value, or command
+- `sfx_error.wav` – indicates an error during operation, an invalid value, an unknown command, etc.
+
+**Additional functions**
+- `chime_hourly_bell.wav` – played at the start of each hour (except during silent hours)
+- `chime_quarter.wav` – played at each quarter of an hour (except during silent hours)
+- `startup_greeting.wav` – startup sound, played when power is applied to the device
+

@@ -52,7 +52,7 @@ struct ToneState {
     uint16_t freqHz = 0;
     uint32_t remainingSamples = 0;
     uint32_t phase = 0;
-    uint8_t volumePercent = 100;
+    uint8_t volumePercent = 30;
 };
 
 struct WavStreamState {
