@@ -647,9 +647,11 @@ void enterEngineeringMenu() {
     printEnabled = false;
     currentMenuState = MENU_ENGINEERING;
 
-    // Автоматически открываем OTA окно на 1 час
+    // Автоматически открываем OTA окно на 1 час только при наличии WiFi.
     if (!otaIsEnabled()) {
-        otaEnable(3600UL * 1000UL);
+        if (!otaEnable(3600UL * 1000UL)) {
+            Serial.println("\n[OTA] Нет соединения по WiFi, инженерное меню открывается без OTA-окна.");
+        }
     }
 
     printEngineeringMenu();

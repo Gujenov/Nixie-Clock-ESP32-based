@@ -10,6 +10,7 @@
 - [GPIO_PINOUT.md](GPIO_PINOUT.md) — распределение пинов ESP32-S3, запрещённые линии памяти и USB.
 - [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) — мастер-документ: общая архитектура, время, меню, будильники, ключевые файлы и точки расширения.
 - [ONBOARDING_AND_OTA.md](ONBOARDING_AND_OTA.md) — шаг за шагом: первая прошивка, UART и OTA обновления.
+- [../Data to load/MICROSD_AUDIO_LOADING_GUIDE.md](../Data%20to%20load/MICROSD_AUDIO_LOADING_GUIDE.md) — полное руководство по подготовке и загрузке аудио на microSD: ручной и автоматический сценарии.
 
 ## Технические документы (в папке `technical/`)
 

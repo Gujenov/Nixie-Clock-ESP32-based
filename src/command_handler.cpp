@@ -58,6 +58,8 @@ void handleCommand(String command) {
     if (lowerCommand.startsWith("ota on")) {
         if (otaEnable()) {
             Serial.println("\n[OTA] Режим обновления активирован");
+        } else {
+            Serial.println("\n[OTA] WiFi недоступен; OTA не активирован");
         }
         return;
     }

@@ -24,10 +24,10 @@ bool connectWifiForOta() {
         return true;
     }
 
-    // Стабильнее для ESP32-S3 (особенно при OPI/PSRAM)
-    WiFi.useStaticBuffers(true);
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
+    WiFi.disconnect(true);
+    delay(50);
 
     struct Cred {
         const char* ssid;
@@ -40,19 +40,21 @@ bool connectWifiForOta() {
         {config.wifi_ssid_2, config.wifi_pass_2, "2"}
     };
 
-    const uint32_t deadline = millis() + OTA_CONNECT_TIMEOUT_MS;
+    const uint32_t overallDeadline = millis() + OTA_CONNECT_TIMEOUT_MS;
 
     for (const auto& c : creds) {
         if (!c.ssid || c.ssid[0] == '\0') {
             continue;
         }
 
+        const uint32_t attemptDeadline = millis() + OTA_CONNECT_TIMEOUT_MS / 2UL;
         Serial.printf("\n[OTA] -> [WiFi] Подключение к сети %s: %s", c.label, c.ssid);
         WiFi.begin(c.ssid, c.pass);
 
-        while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
-            delay(250);
+        while (WiFi.status() != WL_CONNECTED && millis() < attemptDeadline) {
+            delay(200);
             Serial.print(".");
+            yield();
         }
 
         if (WiFi.status() == WL_CONNECTED) {
@@ -61,10 +63,17 @@ bool connectWifiForOta() {
             return true;
         }
 
+        Serial.printf("\n[OTA] -> [WiFi] Сеть %s недоступна, пробуем следующую", c.ssid);
         WiFi.disconnect(true);
-        delay(50);
+        delay(100);
+
+        if (millis() >= overallDeadline) {
+            break;
+        }
     }
 
+    g_wifiOwnedByOta = false;
+    Serial.print("\n[OTA] -> [WiFi] Нет доступной WiFi для OTA. Прерываем запуск.");
     return false;
 }
 
